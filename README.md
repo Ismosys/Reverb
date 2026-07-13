@@ -43,9 +43,10 @@ a persistent SQLite database.
   a layered strategy (native selector → search field → URL parameters).
   Save favorites and switch the active location from the UI.
 - **Multi-location cycling** — enable “Cycle through multiple locations” and the
-  engine runs one pass per selected location in order, saving up to
-  `artistsToSave` artists at each. Falls back to your favorites (then all
-  locations) if no explicit cycle list is set.
+  engine runs one pass per selected location in order. `artistsToSave` is the
+  **total** for the run, split evenly across the visited locations (remainder
+  front-loaded — e.g. 10 artists over 3 cities → 4 / 3 / 3). Falls back to your
+  favorites (then all locations) if no explicit cycle list is set.
 - **Resilient engine** — typed retries with exponential backoff, stale-page
   refresh, browser-crash recovery, skip-already-processed, and continue-on-error
   so a single bad artist never aborts a run.

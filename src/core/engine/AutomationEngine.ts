@@ -19,6 +19,7 @@ import type { HealthMonitor } from '../health/HealthMonitor'
 import type { ReportService } from '../reporting/ReportService'
 import { TypedEmitter } from '../utils/events'
 import { sleep } from '../utils/async'
+import { splitEvenly } from '../utils/numbers'
 import { AppError, AuthenticationError, toMessage } from '../utils/errors'
 
 export interface EngineDeps {
@@ -56,7 +57,6 @@ export class AutomationEngine extends TypedEmitter<EngineEvents> {
   private currentLocation: TrendingLocation | null = null
   private runLocations: TrendingLocation[] = []
   private runLabel: string | null = null
-  private perLocationTarget = 0
   private currentArtist: string | null = null
   private currentOperation: string | null = null
   private consecutiveFailures = 0
@@ -172,12 +172,12 @@ export class AutomationEngine extends TypedEmitter<EngineEvents> {
     this.startedAt = Date.now()
     const cfg = this.deps.config.get()
     const settings = cfg.automation
-    // Resolve the ordered locations this run visits. Cycling targets
-    // `artistsToSave` at each; a single-location run keeps the classic behaviour.
+    // Resolve the ordered locations this run visits. `artistsToSave` is the
+    // TOTAL target for the run, split as evenly as possible across the visited
+    // locations (front-loading any remainder). A single-location run gets it all.
     this.runLocations = this.deps.config.resolveRunLocations()
-    this.perLocationTarget = settings.artistsToSave
+    this.target = settings.artistsToSave
     const passes = Math.max(1, this.runLocations.length)
-    this.target = this.perLocationTarget * passes
     this.currentLocation = this.runLocations[0] ?? null
     this.runLabel = this.runLocations.length ? this.runLocations.map((l) => l.label).join(' → ') : null
     const runLabel = this.runLabel ?? 'default'
@@ -186,7 +186,7 @@ export class AutomationEngine extends TypedEmitter<EngineEvents> {
     this.setState('starting')
     this.deps.log.info(
       'engine',
-      `Run started (target=${this.perLocationTarget}${settings.cycleLocations ? `/location × ${passes}` : ''}, location=${runLabel})`
+      `Run started (target=${this.target}${settings.cycleLocations ? ` split across ${passes} location(s)` : ''}, location=${runLabel})`
     )
     this.deps.db.createSession(sessionId, runLabel, this.target)
 
@@ -249,22 +249,29 @@ export class AutomationEngine extends TypedEmitter<EngineEvents> {
     }
 
     // 3. One pass per location (single-location runs use `[location]` or `[null]`).
+    //    The total target is split across passes; the remainder is front-loaded.
     const passes = this.runLocations.length ? this.runLocations : [null]
+    const passTargets = splitEvenly(this.target, passes.length)
     for (let i = 0; i < passes.length; i++) {
-      if (this.signal.aborted || this.saved >= this.target) break
+      const passTarget = passTargets[i]
+      if (this.signal.aborted || this.saved >= this.target || passTarget <= 0) break
       if (settings.stopAfterFailures > 0 && this.consecutiveFailures >= settings.stopAfterFailures) break
       this.currentLocation = passes[i]
-      const suffix = passes.length > 1 ? ` (${i + 1}/${passes.length})` : ''
+      const suffix = passes.length > 1 ? ` (${i + 1}/${passes.length}, target ${passTarget})` : ''
       this.deps.log.info('engine', `Location pass${suffix}: ${this.currentLocation?.label ?? 'default'}`)
-      await this.runLocationPass(this.currentLocation, settings)
+      await this.runLocationPass(this.currentLocation, settings, passTarget)
     }
 
     this.currentArtist = null
     this.setOperation(null)
   }
 
-  /** Scan and process a single location up to `perLocationTarget` fresh saves. */
-  private async runLocationPass(location: TrendingLocation | null, settings: AutomationSettings): Promise<void> {
+  /** Scan and process a single location up to `passTarget` fresh saves. */
+  private async runLocationPass(
+    location: TrendingLocation | null,
+    settings: AutomationSettings,
+    passTarget: number
+  ): Promise<void> {
     // Navigate to Trending in the Community.
     this.setState('navigating')
     this.setOperation('Opening Trending in the Community')
@@ -280,7 +287,7 @@ export class AutomationEngine extends TypedEmitter<EngineEvents> {
     this.setState('scanning')
     this.setOperation('Scanning trending artists')
     const discovered = await this.deps.scanner.scan(page, {
-      target: this.perLocationTarget,
+      target: passTarget,
       maxScrollPages: settings.maxScrollPages,
       signal: this.signal
     })
@@ -297,7 +304,7 @@ export class AutomationEngine extends TypedEmitter<EngineEvents> {
       await this.waitWhilePaused()
       if (this.signal.aborted) break
 
-      if (savedThisPass >= this.perLocationTarget || this.saved >= this.target) {
+      if (savedThisPass >= passTarget || this.saved >= this.target) {
         this.deps.log.info('engine', 'Location target reached; moving on')
         break
       }

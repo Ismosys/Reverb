@@ -59,8 +59,8 @@ export function LocationsPanel({
             Location Cycling — On
           </div>
           <div className="muted">
-            Each run visits these locations in order, saving up to{' '}
-            <strong>{config.automation.artistsToSave}</strong> artists at each:
+            Each run visits these locations in order, splitting the total of{' '}
+            <strong>{config.automation.artistsToSave}</strong> artists evenly across them:
           </div>
           <div style={{ marginTop: 8, fontWeight: 600 }}>
             {cycleOrder || 'No locations selected — favorites (or all) will be used.'}
