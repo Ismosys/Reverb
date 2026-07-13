@@ -32,6 +32,21 @@ win:
     - nsis
   artifactName: ${productName}-${version}-setup.${ext}
 
+dmg:
+  background: build/dmg-background.png
+  window:
+    width: 660
+    height: 400
+  iconSize: 120
+  contents:
+    - x: 180
+      y: 200
+      type: file
+    - x: 480
+      y: 200
+      type: link
+      path: /Applications
+
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true

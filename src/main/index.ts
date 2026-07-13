@@ -1,7 +1,11 @@
 import { join } from 'node:path'
-import { app, BrowserWindow, shell } from 'electron'
+import { app, BrowserWindow, nativeImage, shell } from 'electron'
 import { AppContainer } from '@core/AppContainer'
 import { registerIpc } from './ipc'
+// Bundled by electron-vite; resolves to a real path in dev and packaged builds.
+import appIconPath from '../../build/icon.png?asset'
+
+const appIcon = nativeImage.createFromPath(appIconPath)
 
 /**
  * Electron main entrypoint. Owns the window lifecycle, constructs the single
@@ -21,6 +25,7 @@ function createWindow(): void {
     minHeight: 700,
     show: false,
     backgroundColor: '#0b0e14',
+    icon: appIcon,
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -48,6 +53,10 @@ function createWindow(): void {
 
 app.whenReady().then(() => {
   app.setAppUserModelId('com.reverb.automation')
+  // Dock icon for unpackaged (dev) runs; packaged builds use the bundle icns.
+  if (process.platform === 'darwin' && app.dock && !appIcon.isEmpty()) {
+    app.dock.setIcon(appIcon)
+  }
   container = new AppContainer(app.getPath('userData'))
   disposeIpc = registerIpc(container, () => mainWindow)
 
