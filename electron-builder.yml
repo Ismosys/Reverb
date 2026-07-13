@@ -19,6 +19,7 @@ asarUnpack:
 npmRebuild: true
 
 mac:
+  icon: build/icon.icns
   target:
     - dmg
     - zip
