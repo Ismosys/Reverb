@@ -24,6 +24,8 @@ type BrowserEvents = { statusChanged: BrowserStatus; crashed: void }
 export class BrowserManager extends TypedEmitter<BrowserEvents> {
   private context: BrowserContext | null = null
   private _status: BrowserStatus = 'closed'
+  /** Headless mode of the currently-running context (null when closed). */
+  private currentHeadless: boolean | null = null
   private readonly log: Logger
 
   constructor(log: Logger) {
@@ -46,7 +48,14 @@ export class BrowserManager extends TypedEmitter<BrowserEvents> {
 
   /** Launch (or return the already-running) persistent context. */
   async launch(opts: BrowserOptions): Promise<BrowserContext> {
-    if (this.context && this._status === 'ready') return this.context
+    if (this.context && this._status === 'ready') {
+      // Reuse only when the visibility mode matches; otherwise relaunch so that,
+      // e.g., clicking Login always yields a VISIBLE window even if a headless
+      // context (from Test Connection or a headless run) is already open.
+      if (this.currentHeadless === opts.headless) return this.context
+      this.log.info('browser', `Relaunching browser (headless ${this.currentHeadless} → ${opts.headless})`)
+      await this.close()
+    }
     this.setStatus('launching')
     mkdirSync(opts.profilePath, { recursive: true })
 
@@ -77,10 +86,12 @@ export class BrowserManager extends TypedEmitter<BrowserEvents> {
       })
 
       this.context = context
+      this.currentHeadless = opts.headless
       this.setStatus('ready')
       this.log.info('browser', `Browser launched (headless=${opts.headless})`)
       return context
     } catch (err) {
+      this.currentHeadless = null
       this.setStatus('crashed')
       throw new BrowserCrashError('Failed to launch browser', err)
     }
@@ -112,6 +123,7 @@ export class BrowserManager extends TypedEmitter<BrowserEvents> {
   async close(): Promise<void> {
     const ctx = this.context
     this.context = null
+    this.currentHeadless = null
     this.setStatus('closed')
     if (ctx) {
       try {
