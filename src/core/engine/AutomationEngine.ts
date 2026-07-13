@@ -1,5 +1,6 @@
 import type {
   AuthStatus,
+  AutomationSettings,
   BrowserStatus,
   EngineState,
   RunStatus,
@@ -53,6 +54,9 @@ export class AutomationEngine extends TypedEmitter<EngineEvents> {
   private paused = false
   private startedAt: number | null = null
   private currentLocation: TrendingLocation | null = null
+  private runLocations: TrendingLocation[] = []
+  private runLabel: string | null = null
+  private perLocationTarget = 0
   private currentArtist: string | null = null
   private currentOperation: string | null = null
   private consecutiveFailures = 0
@@ -168,13 +172,23 @@ export class AutomationEngine extends TypedEmitter<EngineEvents> {
     this.startedAt = Date.now()
     const cfg = this.deps.config.get()
     const settings = cfg.automation
-    this.target = settings.artistsToSave
-    this.currentLocation = this.deps.config.getActiveLocation()
+    // Resolve the ordered locations this run visits. Cycling targets
+    // `artistsToSave` at each; a single-location run keeps the classic behaviour.
+    this.runLocations = this.deps.config.resolveRunLocations()
+    this.perLocationTarget = settings.artistsToSave
+    const passes = Math.max(1, this.runLocations.length)
+    this.target = this.perLocationTarget * passes
+    this.currentLocation = this.runLocations[0] ?? null
+    this.runLabel = this.runLocations.length ? this.runLocations.map((l) => l.label).join(' → ') : null
+    const runLabel = this.runLabel ?? 'default'
     const sessionId = `${new Date().toISOString().replace(/[:.]/g, '-')}-${++sessionCounter}`
 
     this.setState('starting')
-    this.deps.log.info('engine', `Run started (target=${this.target}, location=${this.currentLocation?.label ?? 'default'})`)
-    this.deps.db.createSession(sessionId, this.currentLocation?.label ?? null, this.target)
+    this.deps.log.info(
+      'engine',
+      `Run started (target=${this.perLocationTarget}${settings.cycleLocations ? `/location × ${passes}` : ''}, location=${runLabel})`
+    )
+    this.deps.db.createSession(sessionId, runLabel, this.target)
 
     // Optional hard time budget.
     let timeBudget: NodeJS.Timeout | null = null
@@ -212,7 +226,7 @@ export class AutomationEngine extends TypedEmitter<EngineEvents> {
     return this.getStatus()
   }
 
-  /** The ordered automation workflow. */
+  /** The ordered automation workflow. Runs one pass per resolved location. */
   private async runWorkflow(): Promise<void> {
     const cfg = this.deps.config.get()
     const settings = cfg.automation
@@ -225,7 +239,7 @@ export class AutomationEngine extends TypedEmitter<EngineEvents> {
       headless: settings.headless
     })
 
-    // 2. Verify authentication.
+    // 2. Verify authentication (once for the whole run).
     this.setState('authenticating')
     this.setOperation('Verifying authentication')
     this.authStatus = await this.deps.auth.checkAuthenticated()
@@ -234,39 +248,57 @@ export class AutomationEngine extends TypedEmitter<EngineEvents> {
       throw new AuthenticationError(`Session is ${this.authStatus}. Please log in.`)
     }
 
-    // 3. Navigate to Trending in the Community.
+    // 3. One pass per location (single-location runs use `[location]` or `[null]`).
+    const passes = this.runLocations.length ? this.runLocations : [null]
+    for (let i = 0; i < passes.length; i++) {
+      if (this.signal.aborted || this.saved >= this.target) break
+      if (settings.stopAfterFailures > 0 && this.consecutiveFailures >= settings.stopAfterFailures) break
+      this.currentLocation = passes[i]
+      const suffix = passes.length > 1 ? ` (${i + 1}/${passes.length})` : ''
+      this.deps.log.info('engine', `Location pass${suffix}: ${this.currentLocation?.label ?? 'default'}`)
+      await this.runLocationPass(this.currentLocation, settings)
+    }
+
+    this.currentArtist = null
+    this.setOperation(null)
+  }
+
+  /** Scan and process a single location up to `perLocationTarget` fresh saves. */
+  private async runLocationPass(location: TrendingLocation | null, settings: AutomationSettings): Promise<void> {
+    // Navigate to Trending in the Community.
     this.setState('navigating')
     this.setOperation('Opening Trending in the Community')
     const page = await this.deps.nav.gotoTrending({ retries: settings.maxRetries, signal: this.signal })
 
-    // 4. Apply the selected trending location.
-    if (this.currentLocation) {
-      this.setOperation(`Applying location: ${this.currentLocation.label}`)
-      await this.deps.location.apply(page, this.currentLocation, this.signal)
+    // Apply the trending location for this pass.
+    if (location) {
+      this.setOperation(`Applying location: ${location.label}`)
+      await this.deps.location.apply(page, location, this.signal)
     }
 
-    // 5. Scroll + scan until we have enough artists.
+    // Scroll + scan until enough artists for this pass are loaded.
     this.setState('scanning')
     this.setOperation('Scanning trending artists')
     const discovered = await this.deps.scanner.scan(page, {
-      target: this.target,
+      target: this.perLocationTarget,
       maxScrollPages: settings.maxScrollPages,
       signal: this.signal
     })
-    this.deps.log.info('engine', `Discovered ${discovered.length} artist(s) to process`)
+    this.deps.log.info('engine', `Discovered ${discovered.length} artist(s) at ${location?.label ?? 'default'}`)
 
-    // 6. Process artists until target reached or list exhausted.
+    // Process artists until this pass's target is reached or the list is exhausted.
     this.setState('processing')
     const processor = this.deps.processorFactory()
-    const locationLabel = this.currentLocation?.label ?? null
+    const locationLabel = location?.label ?? null
+    let savedThisPass = 0
 
     for (const artist of discovered) {
       if (this.signal.aborted) break
       await this.waitWhilePaused()
       if (this.signal.aborted) break
 
-      if (this.saved >= this.target) {
-        this.deps.log.info('engine', 'Target reached; stopping processing loop')
+      if (savedThisPass >= this.perLocationTarget || this.saved >= this.target) {
+        this.deps.log.info('engine', 'Location target reached; moving on')
         break
       }
       if (settings.stopAfterFailures > 0 && this.consecutiveFailures >= settings.stopAfterFailures) {
@@ -282,6 +314,7 @@ export class AutomationEngine extends TypedEmitter<EngineEvents> {
       switch (result.outcome) {
         case 'saved':
           this.saved++
+          savedThisPass++
           this.consecutiveFailures = 0
           break
         case 'skipped':
@@ -295,9 +328,6 @@ export class AutomationEngine extends TypedEmitter<EngineEvents> {
       this.emitArtist(result.record.artistId)
       this.push()
     }
-
-    this.currentArtist = null
-    this.setOperation(null)
   }
 
   private artistListeners = new Set<(artistId: string) => void>()
@@ -326,7 +356,7 @@ export class AutomationEngine extends TypedEmitter<EngineEvents> {
           sessionId,
           startTime,
           endTime,
-          locationLabel: this.currentLocation?.label ?? null
+          locationLabel: this.runLabel ?? this.currentLocation?.label ?? null
         })
         this.deps.report.writeSessionReport(report)
         this.deps.report.export(settings.reportFormat, undefined, `session-${sessionId}`)

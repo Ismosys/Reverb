@@ -116,6 +116,11 @@ export function SettingsPanel({
       <div className="section-title">Toggles</div>
       <div className="form-grid">
         <Toggle label="Receive updates automatically" checked={a.receiveUpdates} onChange={bool('receiveUpdates')} />
+        <Toggle
+          label="Cycle through multiple locations"
+          checked={a.cycleLocations}
+          onChange={bool('cycleLocations')}
+        />
         <Toggle label="Headless mode" checked={a.headless} onChange={bool('headless')} />
         <Toggle label="Resume previous session" checked={a.resumePreviousSession} onChange={bool('resumePreviousSession')} />
         <Toggle label="Export report on finish" checked={a.exportReportOnFinish} onChange={bool('exportReportOnFinish')} />

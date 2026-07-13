@@ -56,6 +56,9 @@ export interface AutomationSettings {
   resumePreviousSession: boolean
   /** Abort the run after this many consecutive failures (0 = never). */
   stopAfterFailures: number
+  /** When true, the run cycles through `cycleLocationIds`, targeting
+   *  `artistsToSave` artists at EACH location in turn. */
+  cycleLocations: boolean
   /** Automatically export a report when the run finishes. */
   exportReportOnFinish: boolean
   /** Report format used for the auto-export. */
@@ -77,6 +80,8 @@ export interface AppConfig {
   automation: AutomationSettings
   activeLocationId: string | null
   locations: TrendingLocation[]
+  /** Ordered location ids to visit when `automation.cycleLocations` is on. */
+  cycleLocationIds: string[]
   paths: PathsConfig
   /** CSS selectors + URLs for the ReverbNation site (kept configurable so the
    *  app survives site markup changes without a code deploy). */
@@ -242,6 +247,7 @@ export const IpcChannels = {
   locationRemove: 'location:remove',
   locationSetActive: 'location:setActive',
   locationToggleFavorite: 'location:toggleFavorite',
+  locationSetCycle: 'location:setCycle',
   authLogin: 'auth:login',
   authCheck: 'auth:check',
   engineStart: 'engine:start',

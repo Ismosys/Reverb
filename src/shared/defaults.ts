@@ -19,6 +19,7 @@ export const DEFAULT_AUTOMATION: AutomationSettings = {
   maxExecutionTimeMs: 0,
   resumePreviousSession: true,
   stopAfterFailures: 10,
+  cycleLocations: false,
   exportReportOnFinish: true,
   reportFormat: 'csv'
 }
@@ -67,6 +68,7 @@ export function buildDefaultConfig(paths: AppConfig['paths']): AppConfig {
     automation: { ...DEFAULT_AUTOMATION },
     activeLocationId: 'global',
     locations: DEFAULT_LOCATIONS.map((l) => ({ ...l })),
+    cycleLocationIds: [],
     paths,
     site: { ...DEFAULT_SITE }
   }

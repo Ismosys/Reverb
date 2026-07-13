@@ -55,6 +55,7 @@ export function registerIpc(container: AppContainer, getWindow: () => BrowserWin
   ipcMain.handle(IpcChannels.locationRemove, wrap((_e, id) => config.removeLocation(id as string)))
   ipcMain.handle(IpcChannels.locationSetActive, wrap((_e, id) => config.setActiveLocation(id as string | null)))
   ipcMain.handle(IpcChannels.locationToggleFavorite, wrap((_e, id) => config.toggleFavorite(id as string)))
+  ipcMain.handle(IpcChannels.locationSetCycle, wrap((_e, ids) => config.setCycleLocationIds((ids as string[]) ?? [])))
 
   /* ------------------------------ Auth -------------------------------- */
   ipcMain.handle(

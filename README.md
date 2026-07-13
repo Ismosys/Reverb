@@ -42,6 +42,10 @@ a persistent SQLite database.
 - **Trending location control** — country / state / city / region, applied via
   a layered strategy (native selector → search field → URL parameters).
   Save favorites and switch the active location from the UI.
+- **Multi-location cycling** — enable “Cycle through multiple locations” and the
+  engine runs one pass per selected location in order, saving up to
+  `artistsToSave` artists at each. Falls back to your favorites (then all
+  locations) if no explicit cycle list is set.
 - **Resilient engine** — typed retries with exponential backoff, stale-page
   refresh, browser-crash recovery, skip-already-processed, and continue-on-error
   so a single bad artist never aborts a run.
@@ -149,6 +153,8 @@ npx playwright install chromium
 | `npm run start`       | Preview the production build locally                          |
 | `npm run build`       | Typecheck + build main / preload / renderer bundles           |
 | `npm run typecheck`   | Strict TypeScript checks (node + web projects)               |
+| `npm test`            | Run the Vitest unit suite once                               |
+| `npm run test:watch`  | Run Vitest in watch mode                                      |
 | `npm run lint`        | ESLint over `.ts` / `.tsx`                                     |
 | `npm run format`      | Prettier formatting                                           |
 | `npm run package`     | Build an unpacked app (no installer) into `release/`          |
@@ -184,7 +190,10 @@ immediately.
    page; sign in normally. The session is persisted so you won't be asked again
    until it expires.
 2. **Pick a location** — go to **Locations**, add or select a country/state/
-   city/region, and mark favorites for quick switching.
+   city/region, and mark favorites for quick switching. To visit several
+   locations in one run, enable **“Cycle through multiple locations”** in
+   Settings and tick the **In cycle** box for each location you want; the run
+   visits them in the order you ticked them.
 3. **Tune settings** — in **Settings**, set how many artists to save, whether to
    enable updates, pacing/delays, headless mode, etc. Click **Save Settings**.
 4. **Start** — click **Start Automation**. Watch live progress on the
@@ -210,6 +219,30 @@ needed to adapt. Each selector accepts multiple comma-separated candidates, and
 the automation falls back gracefully. If saves or scans stop working, open
 `config.json`, update the relevant `site.*` selector, and restart. Sensible
 best-effort defaults ship in [`src/shared/defaults.ts`](src/shared/defaults.ts).
+
+## Testing
+
+Pure business logic is covered by a fast [Vitest](https://vitest.dev) suite
+(no Electron, Playwright, DOM or filesystem required):
+
+```bash
+npm test
+```
+
+Covered today (`tests/`):
+
+- **`async.test.ts`** — retry/backoff (`withRetry`), `withTimeout`, `randomInt`
+  bounds, and bounded-concurrency `mapPool` (ordering, isolated rejections,
+  concurrency cap).
+- **`validation.test.ts`** — `artistIdFromUrl` across URL shapes, `isHttpUrl`,
+  `clamp`, and the `requireString` / `requireNumber` guards.
+- **`report-format.test.ts`** — CSV escaping/quoting, Excel (SpreadsheetML) XML
+  escaping, and `averageProcessingMs`.
+
+Report serialization lives in the pure module
+[`src/core/reporting/format.ts`](src/core/reporting/format.ts) precisely so it
+can be tested in isolation from the database — a template for how to keep new
+logic testable.
 
 ## Extending Reverb
 

@@ -141,6 +141,32 @@ export class ConfigManager extends TypedEmitter<ConfigEvents> {
     return this.save({ ...this.config, locations })
   }
 
+  /** Set the ordered list of locations to cycle through (unknown ids dropped). */
+  setCycleLocationIds(ids: string[]): AppConfig {
+    const known = new Set(this.config.locations.map((l) => l.id))
+    const filtered = ids.filter((id) => known.has(id))
+    return this.save({ ...this.config, cycleLocationIds: filtered })
+  }
+
+  /**
+   * Resolve the ordered locations a run should visit.
+   * - Cycling off → just the active location (or []).
+   * - Cycling on  → `cycleLocationIds` in order; falls back to favorites, then
+   *   all locations, so enabling the toggle never yields an empty run.
+   */
+  resolveRunLocations(): TrendingLocation[] {
+    const byId = new Map(this.config.locations.map((l) => [l.id, l]))
+    if (!this.config.automation.cycleLocations) {
+      const active = this.getActiveLocation()
+      return active ? [active] : []
+    }
+    const fromIds = this.config.cycleLocationIds.map((id) => byId.get(id)).filter((l): l is TrendingLocation => !!l)
+    if (fromIds.length > 0) return fromIds
+    const favorites = this.config.locations.filter((l) => l.favorite)
+    if (favorites.length > 0) return favorites
+    return [...this.config.locations]
+  }
+
   /** Reset everything to defaults (keeps resolved paths). */
   reset(): AppConfig {
     const fresh = buildDefaultConfig(this.config.paths)

@@ -40,9 +40,33 @@ export function LocationsPanel({
   }
 
   const favorites = config.locations.filter((l) => l.favorite)
+  const cycleIds = config.cycleLocationIds
+  const inCycle = (id: string) => cycleIds.includes(id)
+  const toggleCycle = (id: string) => {
+    const next = inCycle(id) ? cycleIds.filter((x) => x !== id) : [...cycleIds, id]
+    call(api.locations.setCycle(next), 'Updated cycle')
+  }
+  const cycleOrder = cycleIds
+    .map((id) => config.locations.find((l) => l.id === id)?.label)
+    .filter(Boolean)
+    .join(' → ')
 
   return (
     <div className="grid" style={{ gap: 18 }}>
+      {config.automation.cycleLocations && (
+        <div className="card">
+          <div className="section-title" style={{ margin: '0 0 8px' }}>
+            Location Cycling — On
+          </div>
+          <div className="muted">
+            Each run visits these locations in order, saving up to{' '}
+            <strong>{config.automation.artistsToSave}</strong> artists at each:
+          </div>
+          <div style={{ marginTop: 8, fontWeight: 600 }}>
+            {cycleOrder || 'No locations selected — favorites (or all) will be used.'}
+          </div>
+        </div>
+      )}
       {favorites.length > 0 && (
         <div className="card">
           <div className="section-title" style={{ margin: '0 0 12px' }}>
@@ -76,6 +100,7 @@ export function LocationsPanel({
                 <th>Type</th>
                 <th>Detail</th>
                 <th>Favorite</th>
+                <th>In cycle</th>
                 <th></th>
               </tr>
             </thead>
@@ -98,6 +123,9 @@ export function LocationsPanel({
                     <button className="btn" onClick={() => call(api.locations.toggleFavorite(l.id), 'Updated favorite')}>
                       {l.favorite ? '★' : '☆'}
                     </button>
+                  </td>
+                  <td>
+                    <input type="checkbox" checked={inCycle(l.id)} onChange={() => toggleCycle(l.id)} />
                   </td>
                   <td>
                     <button className="btn danger" onClick={() => call(api.locations.remove(l.id), `Removed ${l.label}`)}>

@@ -22,6 +22,7 @@ export const automationSchema = z.object({
   maxExecutionTimeMs: z.number().int().min(0),
   resumePreviousSession: z.boolean(),
   stopAfterFailures: z.number().int().min(0).max(1000),
+  cycleLocations: z.boolean(),
   exportReportOnFinish: z.boolean(),
   reportFormat: z.enum(['csv', 'json', 'xlsx'])
 })
@@ -65,6 +66,7 @@ export const appConfigSchema = z.object({
   automation: automationSchema,
   activeLocationId: z.string().nullable(),
   locations: z.array(locationSchema),
+  cycleLocationIds: z.array(z.string()),
   paths: pathsSchema,
   site: siteSchema
 })
