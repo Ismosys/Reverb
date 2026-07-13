@@ -8,18 +8,19 @@
 /* Configuration                                                       */
 /* ------------------------------------------------------------------ */
 
-/** A single trending location the automation can target. */
+/**
+ * A trending "location" on ReverbNation's Charts. The site exposes a geo *scope*
+ * (relative to the account's region) rather than arbitrary places, so a location
+ * is one of Global / National / Regional / Local.
+ */
 export interface TrendingLocation {
-  /** Stable identifier (uuid or slug). */
+  /** Stable identifier: global | national | regional | local. */
   id: string
-  /** Human friendly label, e.g. "Austin, TX". */
+  /** Human friendly label, e.g. "National". */
   label: string
-  type: 'country' | 'state' | 'city' | 'region'
-  /** Country name or ISO code. */
-  country?: string
-  state?: string
-  city?: string
-  region?: string
+  type: 'global' | 'national' | 'regional' | 'local'
+  /** The value written to the charts `select[name="geo"]` (e.g. "string:national"). */
+  geoValue: string
   /** Marked by the user as a favorite for quick access. */
   favorite?: boolean
 }
@@ -88,26 +89,31 @@ export interface AppConfig {
   site: SiteSelectors
 }
 
-/** All site-specific coupling lives here so it can be tuned from config. */
+/**
+ * All site-specific coupling lives here so it can be tuned from config without a
+ * code change. Values are verified against the live ReverbNation (AngularJS) app.
+ */
 export interface SiteSelectors {
   baseUrl: string
-  trendingPath: string
-  loggedInIndicator: string
+  /** The "Trending" page — ReverbNation Charts. */
+  chartsPath: string
   loginPath: string
-  /** Selector matching each artist card in the trending grid. */
-  artistCard: string
-  artistName: string
-  artistLink: string
-  /** "Save to library" control (on card or profile page). */
-  saveButton: string
-  savedState: string
-  /** "Receive updates" / notifications toggle. */
-  updatesButton: string
-  updatesEnabledState: string
-  /** Location selector control, if present. */
-  locationSelector: string
-  locationSearchInput: string
-  locationOption: string
+  /** Present only when logged IN (e.g. My Library / Log Out nav links). */
+  loggedInIndicator: string
+  /** Present only when logged OUT (the "Log In" nav link). */
+  loggedOutIndicator: string
+  /** The geo-scope <select> on the charts page. */
+  geoSelect: string
+  /** Anchors on the charts page that link to an artist's vanity profile. */
+  artistProfileLink: string
+  /** "Become a Fan" control on an artist profile (the save action). */
+  becomeFanButton: string
+  /** "Remove Fan" control — present only when already a fan (already saved). */
+  removeFanButton: string
+  /** "Yes" in the receive-updates prompt shown after becoming a fan. */
+  fanConfirmYes: string
+  /** "No" in the receive-updates prompt. */
+  fanConfirmNo: string
 }
 
 /* ------------------------------------------------------------------ */

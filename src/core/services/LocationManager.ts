@@ -1,101 +1,65 @@
 import type { Page } from 'playwright'
 import type { SiteSelectors, TrendingLocation } from '@shared/types'
 import type { Logger } from '../logging/Logger'
-import type { NavigationService } from './NavigationService'
-import type { HumanBehavior } from './HumanBehavior'
+import { sleep } from '../utils/async'
 
 /**
- * Applies a trending location before scanning.
+ * Applies a trending geo scope on the ReverbNation Charts page.
  *
- * ReverbNation exposes location in different ways over time, so this tries a
- * layered strategy and stops at the first that works:
- *   1. A native <select> / dropdown selector, if present.
- *   2. A free-text search input with an option list.
- *   3. A URL query parameter fallback (?location=...), which many trending
- *      endpoints honour and is the most robust when markup shifts.
+ * The charts page exposes a single `<select name="geo">` with four AngularJS
+ * options (Global / National / Regional / Local). We set the select's value and
+ * dispatch the `change` event Angular listens for, then wait for the list to
+ * refresh.
  */
 export class LocationManager {
   constructor(
     private readonly site: SiteSelectors,
-    private readonly nav: NavigationService,
-    private readonly human: HumanBehavior,
     private readonly log: Logger
   ) {}
 
-  /** Apply `location` on `page`. Returns true if a method succeeded. */
+  /** Apply `location`'s geo scope on `page` (the charts page). */
   async apply(page: Page, location: TrendingLocation, signal?: AbortSignal): Promise<boolean> {
-    if (location.id === 'global') {
-      this.log.info('location', 'Global location — no filter applied')
-      return true
+    const select = page.locator(this.site.geoSelect).first()
+    if (!(await select.isVisible().catch(() => false))) {
+      this.log.warn('location', 'Geo select not found on charts page', { status: 'degraded' })
+      return false
     }
-    this.log.info('location', `Applying location: ${location.label}`)
 
-    if (await this.trySelector(page, location, signal)) return true
-    if (await this.trySearch(page, location, signal)) return true
-    if (await this.tryUrlParam(location, signal)) return true
-
-    this.log.warn('location', `Could not apply location "${location.label}" via any method`, { status: 'degraded' })
-    return false
-  }
-
-  private async trySelector(page: Page, location: TrendingLocation, signal?: AbortSignal): Promise<boolean> {
-    const selector = page.locator(this.site.locationSelector).first()
-    if (!(await selector.isVisible().catch(() => false))) return false
     try {
-      const tag = await selector.evaluate((el) => el.tagName.toLowerCase()).catch(() => '')
-      if (tag === 'select') {
-        await selector.selectOption({ label: location.label }).catch(async () => {
-          await selector.selectOption({ value: location.label })
+      // Prefer Playwright's selectOption (by value, then by visible label).
+      const applied = await select
+        .selectOption(location.geoValue)
+        .then(() => true)
+        .catch(async () => {
+          return select
+            .selectOption({ label: location.label })
+            .then(() => true)
+            .catch(() => false)
         })
-      } else {
-        await this.human.click(page, this.site.locationSelector, signal)
-        await page.locator(this.site.locationOption, { hasText: location.label }).first().click({ timeout: 6000 })
+
+      if (!applied) {
+        // Fallback: set the value directly and fire the events Angular needs.
+        await select.evaluate((el, value) => {
+          const sel = el as unknown as {
+            options: ArrayLike<{ value: string; text: string }>
+            value: string
+            dispatchEvent: (e: unknown) => void
+          }
+          const g = globalThis as unknown as { Event: new (t: string, o: { bubbles: boolean }) => unknown }
+          const match = Array.from(sel.options).find((o) => o.value === value || o.text.trim() === value)
+          if (match) sel.value = match.value
+          sel.dispatchEvent(new g.Event('change', { bubbles: true }))
+          sel.dispatchEvent(new g.Event('input', { bubbles: true }))
+        }, location.geoValue)
       }
-      await this.nav.refresh(signal)
-      this.log.info('location', `Location applied via selector: ${location.label}`)
-      return true
-    } catch (err) {
-      this.log.debug('location', 'Selector method failed', { error: err instanceof Error ? err.message : String(err) })
-      return false
-    }
-  }
 
-  private async trySearch(page: Page, location: TrendingLocation, signal?: AbortSignal): Promise<boolean> {
-    const input = page.locator(this.site.locationSearchInput).first()
-    if (!(await input.isVisible().catch(() => false))) return false
-    try {
-      await input.click()
-      await input.fill('')
-      // Type the most specific term available.
-      const term = location.city ?? location.state ?? location.country ?? location.region ?? location.label
-      await input.type(term, { delay: 90 })
-      await this.human.aroundClick(signal)
-      const option = page.locator(this.site.locationOption, { hasText: location.label }).first()
-      await option.waitFor({ state: 'visible', timeout: 6000 })
-      await option.click()
-      await this.nav.refresh(signal)
-      this.log.info('location', `Location applied via search: ${location.label}`)
+      await sleep(2500, signal)
+      this.log.info('location', `Applied geo scope: ${location.label}`)
       return true
     } catch (err) {
-      this.log.debug('location', 'Search method failed', { error: err instanceof Error ? err.message : String(err) })
-      return false
-    }
-  }
-
-  private async tryUrlParam(location: TrendingLocation, signal?: AbortSignal): Promise<boolean> {
-    try {
-      const params = new URLSearchParams()
-      if (location.country) params.set('country', location.country)
-      if (location.state) params.set('state', location.state)
-      if (location.city) params.set('city', location.city)
-      if (location.region) params.set('region', location.region)
-      params.set('location', location.label)
-      const path = `${this.site.trendingPath}?${params.toString()}`
-      await this.nav.goto(path, { retries: 2, signal })
-      this.log.info('location', `Location applied via URL parameter: ${location.label}`)
-      return true
-    } catch (err) {
-      this.log.debug('location', 'URL param method failed', { error: err instanceof Error ? err.message : String(err) })
+      this.log.warn('location', `Failed to apply geo scope "${location.label}"`, {
+        error: err instanceof Error ? err.message : String(err)
+      })
       return false
     }
   }

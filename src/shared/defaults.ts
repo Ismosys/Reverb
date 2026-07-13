@@ -25,41 +25,32 @@ export const DEFAULT_AUTOMATION: AutomationSettings = {
 }
 
 /**
- * Best-effort ReverbNation selectors. These are the single point of coupling to
- * the live site; when the markup changes, tune these values in config instead
- * of editing code. Multiple candidate selectors are comma-separated so the
- * automation can fall back gracefully.
+ * ReverbNation selectors, verified against the live (AngularJS) site. This is the
+ * single point of coupling to the site; when the markup changes, tune these here
+ * (or in config) instead of editing service code. Comma-separated candidates let
+ * the automation fall back gracefully.
  */
 export const DEFAULT_SITE: SiteSelectors = {
   baseUrl: 'https://www.reverbnation.com',
-  trendingPath: '/main/trending',
-  loggedInIndicator:
-    '[data-testid="user-menu"], a[href*="/logout"], .account-menu, .user-avatar',
+  chartsPath: '/main/charts',
   loginPath: '/login',
-  artistCard:
-    '[data-testid="artist-card"], .artist_card, .trending_artist, li[data-artist-id]',
-  artistName:
-    '[data-testid="artist-name"], .artist_name, .name a, h3 a',
-  artistLink: 'a[href*="/artist/"], a[href*="/"]',
-  saveButton:
-    'button[data-testid="save-to-library"], button:has-text("Save"), .save_to_library, .fan-button',
-  savedState:
-    'button[data-testid="save-to-library"][aria-pressed="true"], .saved, button:has-text("Saved"), .fanned',
-  updatesButton:
-    'button[data-testid="receive-updates"], button:has-text("Receive updates"), .notify-button',
-  updatesEnabledState:
-    'button[data-testid="receive-updates"][aria-pressed="true"], .updates-on, button:has-text("Updates on")',
-  locationSelector:
-    '[data-testid="location-selector"], .location-selector, select[name="location"]',
-  locationSearchInput:
-    'input[data-testid="location-search"], input[placeholder*="location" i], input[name="location"]',
-  locationOption:
-    '[data-testid="location-option"], .location-option, li[role="option"]'
+  loggedInIndicator: 'a.qa-library, a.qa-log-out, a.qa-user-icon',
+  loggedOutIndicator: 'a.qa-login',
+  geoSelect: 'select[name="geo"]',
+  // Vanity-profile anchors on the charts listing (excluding site routes handled in code).
+  artistProfileLink: 'a[href^="/"]',
+  becomeFanButton: 'a.button--add--profile, a.qa-become-fan, a.ng-scope.button--primary:has-text("Become A Fan")',
+  removeFanButton: 'a.button--added--profile, a:has-text("Remove Fan")',
+  fanConfirmYes: 'a.js-fan-action:has-text("Yes")',
+  fanConfirmNo: 'a.js-fan-action:has-text("No")'
 }
 
+/** The four geo scopes ReverbNation Charts supports. */
 export const DEFAULT_LOCATIONS: TrendingLocation[] = [
-  { id: 'global', label: 'Global', type: 'region', favorite: true },
-  { id: 'us', label: 'United States', type: 'country', country: 'United States', favorite: true }
+  { id: 'global', label: 'Global', type: 'global', geoValue: 'string:global', favorite: true },
+  { id: 'national', label: 'National', type: 'national', geoValue: 'string:national', favorite: true },
+  { id: 'regional', label: 'Regional', type: 'regional', geoValue: 'string:regional' },
+  { id: 'local', label: 'Local', type: 'local', geoValue: 'string:local' }
 ]
 
 /** Build a complete default config given resolved paths. */

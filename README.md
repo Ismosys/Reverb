@@ -36,17 +36,20 @@ a persistent SQLite database.
 - **Persistent authentication** — log in once in a real browser window; the
   Playwright persistent profile keeps the session across restarts. Expired
   sessions are detected and you're prompted to re-authenticate only when needed.
-- **Full automation workflow** — launch → authenticate → open Trending →
-  wait for content → auto-scroll → collect artists → open profile → save →
-  enable updates → verify → repeat until the target is reached.
-- **Trending location control** — country / state / city / region, applied via
-  a layered strategy (native selector → search field → URL parameters).
-  Save favorites and switch the active location from the UI.
+- **Full automation workflow** — launch → authenticate → open the Charts
+  (trending) page → apply the geo scope → auto-scroll → collect artist profiles
+  → open each profile → "Become a Fan" (save) → set update notifications via the
+  Yes/No prompt → verify → repeat until the target is reached.
+- **Trending location control (geo scope)** — ReverbNation's Charts rank artists
+  by scope relative to your account's region: **Global / National / Regional /
+  Local** (applied via the charts `select[name="geo"]`). Mark favorites and
+  switch the active scope from the UI. _Note: the site does not expose arbitrary
+  country/city targeting on Charts, so the four scopes are what's available._
 - **Multi-location cycling** — enable “Cycle through multiple locations” and the
-  engine runs one pass per selected location in order. `artistsToSave` is the
-  **total** for the run, split evenly across the visited locations (remainder
-  front-loaded — e.g. 10 artists over 3 cities → 4 / 3 / 3). Falls back to your
-  favorites (then all locations) if no explicit cycle list is set.
+  engine runs one pass per selected scope in order. `artistsToSave` is the
+  **total** for the run, split evenly across the visited scopes (remainder
+  front-loaded — e.g. 10 artists over 3 scopes → 4 / 3 / 3). Falls back to your
+  favorites (then all scopes) if no explicit cycle list is set.
 - **Resilient engine** — typed retries with exponential backoff, stale-page
   refresh, browser-crash recovery, skip-already-processed, and continue-on-error
   so a single bad artist never aborts a run.
@@ -218,8 +221,19 @@ Because a third-party site's markup changes over time, **all coupling to
 ReverbNation lives in `config.site`** as CSS selectors — no code change is
 needed to adapt. Each selector accepts multiple comma-separated candidates, and
 the automation falls back gracefully. If saves or scans stop working, open
-`config.json`, update the relevant `site.*` selector, and restart. Sensible
-best-effort defaults ship in [`src/shared/defaults.ts`](src/shared/defaults.ts).
+`config.json`, update the relevant `site.*` selector, and restart. The shipped
+defaults in [`src/shared/defaults.ts`](src/shared/defaults.ts) are **verified
+against the live site**, and map to how ReverbNation actually works:
+
+| Concern       | Reality on ReverbNation                                                        |
+| ------------- | ----------------------------------------------------------------------------- |
+| Auth          | Logged in ⇒ `a.qa-library` / `a.qa-log-out` present; logged out ⇒ `a.qa-login` |
+| Trending      | The **Charts** page (`/main/charts`), an AngularJS view                        |
+| Location      | `select[name="geo"]` with `global` / `national` / `regional` / `local`         |
+| Artist links  | Single-segment vanity slugs (e.g. `/leelagrant`) in the chart listing          |
+| Save          | "Become a Fan" (`a.button--add--profile`) on the artist profile               |
+| Updates       | The Yes/No prompt (`a.js-fan-action`) shown right after becoming a fan          |
+| Already saved | "Remove Fan" (`a.button--added--profile`) is shown instead                     |
 
 ## Testing
 

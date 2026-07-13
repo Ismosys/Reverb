@@ -5,7 +5,6 @@ import type { Database } from '../db/Database'
 import type { Logger } from '../logging/Logger'
 import type { DiscoveredArtist } from './TrendingScanner'
 import type { LibraryManager } from './LibraryManager'
-import type { UpdatesManager } from './UpdatesManager'
 import type { HumanBehavior } from './HumanBehavior'
 import { withRetry } from '../utils/async'
 import { AppError, toMessage } from '../utils/errors'
@@ -28,7 +27,6 @@ export class ArtistProcessor {
     private readonly browser: BrowserManager,
     private readonly db: Database,
     private readonly library: LibraryManager,
-    private readonly updates: UpdatesManager,
     private readonly human: HumanBehavior,
     private readonly settings: AutomationSettings,
     private readonly log: Logger
@@ -93,30 +91,41 @@ export class ArtistProcessor {
   ): Promise<ArtistRecord> {
     const page = await this.openProfile(artist.profileUrl, signal)
 
-    const saved = await this.library.save(page, artist.name, signal)
-    if (!saved) throw new AppError(`Could not save ${artist.name}`, { code: 'SAVE', recoverable: true })
+    // Resolve the authoritative artist name from the profile page title.
+    const realName = await this.resolveName(page, artist.name)
+    if (realName !== artist.name) this.db.updateName(artist.artistId, realName)
 
-    let updatesEnabled = false
-    if (this.settings.receiveUpdates) {
-      updatesEnabled = await this.updates.enable(page, artist.name, signal)
-    }
+    // Save + set updates in one flow ("Become a Fan" → Yes/No prompt).
+    const result = await this.library.save(page, realName, this.settings.receiveUpdates, signal)
 
     await this.human.betweenArtists(signal)
 
     const durationMs = Date.now() - startedAt
     const record = this.db.markResult(artist.artistId, {
       status: 'saved',
-      updatesEnabled,
+      updatesEnabled: result.updatesEnabled,
       failureReason: null,
       durationMs,
       incrementRetry: attempt > 0
     })
-    this.log.info('artist', `Completed: ${artist.name}`, {
-      artist: artist.name,
+    this.log.info('artist', `Completed: ${realName}${result.alreadySaved ? ' (already a fan)' : ''}`, {
+      artist: realName,
       status: 'saved',
       durationMs
     })
     return record
+  }
+
+  /** Read the artist's display name from the profile page `<title>`. */
+  private async resolveName(page: Page, fallback: string): Promise<string> {
+    try {
+      const title = await page.title()
+      // ReverbNation titles are "Artist Name | ReverbNation".
+      const name = title.split('|')[0].trim()
+      return name.length >= 2 ? name : fallback
+    } catch {
+      return fallback
+    }
   }
 
   /** Navigate to the artist profile when the action can't be done inline. */
@@ -124,7 +133,7 @@ export class ArtistProcessor {
     const page = await this.browser.getPage()
     if (!page.url().startsWith(url)) {
       await page.goto(url, { waitUntil: 'domcontentloaded' })
-      await page.waitForLoadState('networkidle', { timeout: 6000 }).catch(() => undefined)
+      await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => undefined)
     }
     if (signal?.aborted) throw new AppError('Aborted', { code: 'ABORTED' })
     return page

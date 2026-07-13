@@ -41,17 +41,17 @@ export class NavigationService {
     )
   }
 
-  /** Navigate to the "Trending in the Community" page. */
+  /** Navigate to the "Trending" page (ReverbNation Charts). */
   async gotoTrending(opts: { retries: number; signal?: AbortSignal }): Promise<Page> {
-    this.log.info('navigate', 'Opening Trending in the Community')
-    const page = await this.goto(this.site.trendingPath, opts)
-    // Wait for at least one artist card (content finished loading).
+    this.log.info('navigate', 'Opening Charts (Trending)')
+    const page = await this.goto(this.site.chartsPath, opts)
+    // Wait for the charts UI (geo select) to be present.
     await page
-      .locator(this.site.artistCard)
+      .locator(this.site.geoSelect)
       .first()
       .waitFor({ state: 'visible', timeout: 20000 })
       .catch(() => {
-        this.log.warn('navigate', 'No artist cards visible yet on trending page')
+        this.log.warn('navigate', 'Geo selector not visible yet on charts page')
       })
     return page
   }

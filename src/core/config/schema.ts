@@ -30,11 +30,8 @@ export const automationSchema = z.object({
 export const locationSchema = z.object({
   id: z.string().min(1),
   label: z.string().min(1),
-  type: z.enum(['country', 'state', 'city', 'region']),
-  country: z.string().optional(),
-  state: z.string().optional(),
-  city: z.string().optional(),
-  region: z.string().optional(),
+  type: z.enum(['global', 'national', 'regional', 'local']),
+  geoValue: z.string().min(1),
   favorite: z.boolean().optional()
 })
 
@@ -47,19 +44,16 @@ export const pathsSchema = z.object({
 
 export const siteSchema = z.object({
   baseUrl: z.string().url(),
-  trendingPath: z.string(),
-  loggedInIndicator: z.string(),
+  chartsPath: z.string(),
   loginPath: z.string(),
-  artistCard: z.string(),
-  artistName: z.string(),
-  artistLink: z.string(),
-  saveButton: z.string(),
-  savedState: z.string(),
-  updatesButton: z.string(),
-  updatesEnabledState: z.string(),
-  locationSelector: z.string(),
-  locationSearchInput: z.string(),
-  locationOption: z.string()
+  loggedInIndicator: z.string(),
+  loggedOutIndicator: z.string(),
+  geoSelect: z.string(),
+  artistProfileLink: z.string(),
+  becomeFanButton: z.string(),
+  removeFanButton: z.string(),
+  fanConfirmYes: z.string(),
+  fanConfirmNo: z.string()
 })
 
 export const appConfigSchema = z.object({

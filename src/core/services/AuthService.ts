@@ -38,9 +38,14 @@ export class AuthService {
         return 'authenticated'
       }
 
-      // No logged-in indicator: distinguish "never logged in" from "expired".
-      const onLogin = page.url().includes(this.site.loginPath) || (await this.looksLikeLoginPage(page))
-      const status: AuthStatus = onLogin ? 'expired' : 'unauthenticated'
+      // No logged-in indicator: if the "Log In" affordance is present we are
+      // definitively logged out; otherwise treat as an expired/unknown session.
+      const loggedOut = await page
+        .locator(this.site.loggedOutIndicator)
+        .first()
+        .isVisible()
+        .catch(() => false)
+      const status: AuthStatus = loggedOut ? 'unauthenticated' : 'expired'
       this.log.warn('auth', `Session not authenticated (${status})`, { status })
       return status
     } catch (err) {
@@ -83,13 +88,7 @@ export class AuthService {
     if (!page.url().startsWith(this.site.baseUrl)) {
       await page.goto(this.site.baseUrl, { waitUntil: 'domcontentloaded' })
     }
-  }
-
-  private async looksLikeLoginPage(page: Page): Promise<boolean> {
-    return page
-      .locator('input[type="password"]')
-      .first()
-      .isVisible()
-      .catch(() => false)
+    // Allow the AngularJS header to hydrate before we read auth state.
+    await page.waitForTimeout(1500)
   }
 }

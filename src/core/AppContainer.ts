@@ -7,7 +7,6 @@ import { NavigationService } from './services/NavigationService'
 import { LocationManager } from './services/LocationManager'
 import { TrendingScanner } from './services/TrendingScanner'
 import { LibraryManager } from './services/LibraryManager'
-import { UpdatesManager } from './services/UpdatesManager'
 import { ArtistProcessor } from './services/ArtistProcessor'
 import { HumanBehavior } from './services/HumanBehavior'
 import { HealthMonitor } from './health/HealthMonitor'
@@ -29,7 +28,6 @@ export class AppContainer {
   readonly location: LocationManager
   readonly scanner: TrendingScanner
   readonly library: LibraryManager
-  readonly updates: UpdatesManager
   readonly health: HealthMonitor
   readonly report: ReportService
   readonly engine: AutomationEngine
@@ -45,10 +43,9 @@ export class AppContainer {
     const human = new HumanBehavior(cfg.automation)
     this.auth = new AuthService(this.browser, cfg.site, this.log)
     this.nav = new NavigationService(this.browser, cfg.site, this.log)
-    this.location = new LocationManager(cfg.site, this.nav, human, this.log)
+    this.location = new LocationManager(cfg.site, this.log)
     this.scanner = new TrendingScanner(cfg.site, human, this.log)
     this.library = new LibraryManager(cfg.site, human, this.log)
-    this.updates = new UpdatesManager(cfg.site, human, this.log)
     this.report = new ReportService(this.db, cfg.paths.reportsPath, this.log)
     this.health = new HealthMonitor(this.browser, this.db)
 
@@ -59,7 +56,6 @@ export class AppContainer {
         this.browser,
         this.db,
         this.library,
-        this.updates,
         new HumanBehavior(current.automation),
         current.automation,
         this.log

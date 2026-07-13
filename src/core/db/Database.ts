@@ -115,6 +115,11 @@ export class Database {
     this.db.prepare(`UPDATE artists SET status = 'processing' WHERE artist_id = ?`).run(artistId)
   }
 
+  /** Update the stored display name (resolved from the artist profile). */
+  updateName(artistId: string, name: string): void {
+    this.db.prepare('UPDATE artists SET name = ? WHERE artist_id = ?').run(name, artistId)
+  }
+
   markResult(
     artistId: string,
     result: {
