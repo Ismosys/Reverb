@@ -1,0 +1,39 @@
+appId: com.reverb.automation
+productName: Reverb
+copyright: Copyright © 2026 Reverb
+
+directories:
+  buildResources: build
+  output: release/${version}
+
+files:
+  - out/**/*
+  - package.json
+
+# Keep the native SQLite build and Playwright's downloaded browsers out of asar
+# so they can be spawned/loaded at runtime.
+asarUnpack:
+  - '**/*.node'
+  - node_modules/better-sqlite3/**
+
+npmRebuild: true
+
+mac:
+  target:
+    - dmg
+    - zip
+  category: public.app-category.music
+  hardenedRuntime: true
+  gatekeeperAssess: false
+
+win:
+  target:
+    - nsis
+  artifactName: ${productName}-${version}-setup.${ext}
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  perMachine: false
+
+publish: null

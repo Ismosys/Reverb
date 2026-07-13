@@ -1,0 +1,72 @@
+import { z } from 'zod'
+
+/**
+ * Zod schemas mirror the shared TypeScript types and are the runtime source of
+ * truth for validating both on-disk config and IPC payloads.
+ */
+
+const delayRange = z
+  .object({ min: z.number().min(0), max: z.number().min(0) })
+  .refine((r) => r.max >= r.min, { message: 'max must be >= min' })
+
+export const automationSchema = z.object({
+  artistsToSave: z.number().int().min(1).max(10000),
+  receiveUpdates: z.boolean(),
+  maxScrollPages: z.number().int().min(1).max(500),
+  maxRetries: z.number().int().min(0).max(20),
+  scrollSpeed: z.number().int().min(50).max(5000),
+  clickDelay: delayRange,
+  headless: z.boolean(),
+  concurrentWorkers: z.number().int().min(1).max(8),
+  randomDelay: delayRange,
+  maxExecutionTimeMs: z.number().int().min(0),
+  resumePreviousSession: z.boolean(),
+  stopAfterFailures: z.number().int().min(0).max(1000),
+  exportReportOnFinish: z.boolean(),
+  reportFormat: z.enum(['csv', 'json', 'xlsx'])
+})
+
+export const locationSchema = z.object({
+  id: z.string().min(1),
+  label: z.string().min(1),
+  type: z.enum(['country', 'state', 'city', 'region']),
+  country: z.string().optional(),
+  state: z.string().optional(),
+  city: z.string().optional(),
+  region: z.string().optional(),
+  favorite: z.boolean().optional()
+})
+
+export const pathsSchema = z.object({
+  databasePath: z.string(),
+  browserProfilePath: z.string(),
+  reportsPath: z.string(),
+  logsPath: z.string()
+})
+
+export const siteSchema = z.object({
+  baseUrl: z.string().url(),
+  trendingPath: z.string(),
+  loggedInIndicator: z.string(),
+  loginPath: z.string(),
+  artistCard: z.string(),
+  artistName: z.string(),
+  artistLink: z.string(),
+  saveButton: z.string(),
+  savedState: z.string(),
+  updatesButton: z.string(),
+  updatesEnabledState: z.string(),
+  locationSelector: z.string(),
+  locationSearchInput: z.string(),
+  locationOption: z.string()
+})
+
+export const appConfigSchema = z.object({
+  automation: automationSchema,
+  activeLocationId: z.string().nullable(),
+  locations: z.array(locationSchema),
+  paths: pathsSchema,
+  site: siteSchema
+})
+
+export type ValidatedConfig = z.infer<typeof appConfigSchema>
