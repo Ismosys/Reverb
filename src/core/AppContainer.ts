@@ -45,7 +45,7 @@ export class AppContainer {
     this.nav = new NavigationService(this.browser, cfg.site, this.log)
     this.location = new LocationManager(cfg.site, this.log)
     this.scanner = new TrendingScanner(cfg.site, human, this.log)
-    this.library = new LibraryManager(cfg.site, human, this.log)
+    this.library = new LibraryManager(cfg.site, this.log)
     this.report = new ReportService(this.db, cfg.paths.reportsPath, this.log)
     this.health = new HealthMonitor(this.browser, this.db)
 

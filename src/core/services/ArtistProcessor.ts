@@ -82,21 +82,21 @@ export class ArtistProcessor {
     }
   }
 
-  /** One save+updates attempt. Throws on failure so withRetry can retry. */
+  /** One fan attempt. Throws on failure so withRetry can retry. */
   private async attempt(
     artist: DiscoveredArtist,
     startedAt: number,
     attempt: number,
     signal?: AbortSignal
   ): Promise<ArtistRecord> {
-    const page = await this.openProfile(artist.profileUrl, signal)
+    const page = await this.ensureReverbPage(signal)
 
-    // Resolve the authoritative artist name from the profile page title.
-    const realName = await this.resolveName(page, artist.name)
+    // Resolve the real name cheaply (a title fetch, no full navigation).
+    const realName = await this.resolveName(page, artist)
     if (realName !== artist.name) this.db.updateName(artist.artistId, realName)
 
-    // Save + set updates in one flow ("Become a Fan" → Yes/No prompt).
-    const result = await this.library.save(page, realName, this.settings.receiveUpdates, signal)
+    // Fan the artist (save to library + set updates) via the CSRF POST.
+    const result = await this.library.save(page, { artistId: artist.artistId, name: realName }, this.settings.receiveUpdates)
 
     await this.human.betweenArtists(signal)
 
@@ -108,19 +108,26 @@ export class ArtistProcessor {
       durationMs,
       incrementRetry: attempt > 0
     })
-    this.log.info('artist', `Completed: ${realName}${result.alreadySaved ? ' (already a fan)' : ''}`, {
-      artist: realName,
-      status: 'saved',
-      durationMs
-    })
+    this.log.info('artist', `Completed: ${realName}`, { artist: realName, status: 'saved', durationMs })
     return record
   }
 
-  /** Read the artist's display name from the profile page `<title>`. */
-  private async resolveName(page: Page, fallback: string): Promise<string> {
+  /**
+   * Resolve the artist's display name by fetching its profile HTML `<title>`
+   * from the page context (fast; no rendering). Falls back to any known name or
+   * a stable id-based placeholder.
+   */
+  private async resolveName(page: Page, artist: DiscoveredArtist): Promise<string> {
+    const fallback = artist.name && artist.name.length >= 2 ? artist.name : `Artist ${artist.artistId}`
     try {
-      const title = await page.title()
-      // ReverbNation titles are "Artist Name | ReverbNation".
+      const title = await page.evaluate(async (id) => {
+        const g = globalThis as unknown as {
+          fetch: (u: string, o: unknown) => Promise<{ text: () => Promise<string> }>
+        }
+        const html = await g.fetch(`/artist/${id}`, { credentials: 'same-origin' }).then((r) => r.text())
+        const m = html.match(/<title>([^<]*)<\/title>/i)
+        return m ? m[1] : ''
+      }, artist.artistId)
       const name = title.split('|')[0].trim()
       return name.length >= 2 ? name : fallback
     } catch {
@@ -128,11 +135,11 @@ export class ArtistProcessor {
     }
   }
 
-  /** Navigate to the artist profile when the action can't be done inline. */
-  private async openProfile(url: string, signal?: AbortSignal): Promise<Page> {
+  /** Ensure the shared page is on reverbnation.com so POST/fetch are same-origin. */
+  private async ensureReverbPage(signal?: AbortSignal): Promise<Page> {
     const page = await this.browser.getPage()
-    if (!page.url().startsWith(url)) {
-      await page.goto(url, { waitUntil: 'domcontentloaded' })
+    if (!/reverbnation\.com/.test(page.url())) {
+      await page.goto('https://www.reverbnation.com/main/charts', { waitUntil: 'domcontentloaded' })
       await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => undefined)
     }
     if (signal?.aborted) throw new AppError('Aborted', { code: 'ABORTED' })

@@ -41,13 +41,13 @@ describe.skipIf(!RUN)('LIVE ReverbNation end-to-end', () => {
         paths: { ...config.get().paths, browserProfilePath: PROFILE! },
         automation: {
           ...config.get().automation,
-          artistsToSave: 2,
+          artistsToSave: 20,
           receiveUpdates: true,
           headless: true,
           maxScrollPages: 6,
           scrollSpeed: 1200,
-          clickDelay: { min: 120, max: 300 },
-          randomDelay: { min: 200, max: 500 },
+          clickDelay: { min: 80, max: 200 },
+          randomDelay: { min: 150, max: 400 },
           cycleLocations: false,
           exportReportOnFinish: true,
           reportFormat: 'csv'
@@ -63,7 +63,7 @@ describe.skipIf(!RUN)('LIVE ReverbNation end-to-end', () => {
       const nav = new NavigationService(browser, cfg.site, log)
       const location = new LocationManager(cfg.site, log)
       const scanner = new TrendingScanner(cfg.site, human, log)
-      const library = new LibraryManager(cfg.site, human, log)
+      const library = new LibraryManager(cfg.site, log)
       const report = new ReportService(db, cfg.paths.reportsPath, log)
       const health = new HealthMonitor(browser, db)
       const engine = new AutomationEngine({
@@ -118,10 +118,12 @@ describe.skipIf(!RUN)('LIVE ReverbNation end-to-end', () => {
         expect(status.authStatus).toBe('authenticated')
         expect(browser.status).toBe('ready')
         expect(['completed', 'idle']).toContain(status.engineState)
-        expect(status.saved + status.skipped).toBeGreaterThanOrEqual(1)
-        expect(status.saved).toBeGreaterThanOrEqual(1)
-        expect(db.savedCount()).toBeGreaterThanOrEqual(1)
-        expect(checks.updatesEnabledCount as number).toBeGreaterThanOrEqual(1)
+        // Pagination must discover well past the old ~8 featured artists.
+        expect(status.processed).toBeGreaterThanOrEqual(15)
+        expect(status.saved + status.skipped).toBeGreaterThanOrEqual(15)
+        expect(status.saved).toBeGreaterThanOrEqual(10)
+        expect(db.savedCount()).toBeGreaterThanOrEqual(10)
+        expect(checks.updatesEnabledCount as number).toBeGreaterThanOrEqual(10)
         expect(checks.reportExists).toBe(true)
         expect(db.ok()).toBe(true)
       } finally {

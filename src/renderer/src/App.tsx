@@ -100,9 +100,11 @@ export function App(): React.JSX.Element {
             </div>
           </div>
           <div className="btn-row">
-            <button className="btn" onClick={login} disabled={busy || running}>
-              Login
-            </button>
+            {status?.authStatus !== 'authenticated' && (
+              <button className="btn" onClick={login} disabled={busy || running}>
+                Login
+              </button>
+            )}
             <button className="btn" onClick={test} disabled={busy}>
               Test Connection
             </button>
