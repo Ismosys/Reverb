@@ -41,18 +41,16 @@ export class NavigationService {
     )
   }
 
-  /** Navigate to the "Trending" page (ReverbNation Charts). */
+  /** Navigate to the Charts page (establishes the session/CSRF context). */
   async gotoTrending(opts: { retries: number; signal?: AbortSignal }): Promise<Page> {
-    this.log.info('navigate', 'Opening Charts (Trending)')
+    this.log.info('navigate', 'Opening Charts')
     const page = await this.goto(this.site.chartsPath, opts)
-    // Wait for the charts UI (geo select) to be present.
+    // Give the AngularJS charts view a moment to hydrate (genre <select>, token).
     await page
-      .locator(this.site.geoSelect)
+      .locator('select[name="genre"]')
       .first()
-      .waitFor({ state: 'visible', timeout: 20000 })
-      .catch(() => {
-        this.log.warn('navigate', 'Geo selector not visible yet on charts page')
-      })
+      .waitFor({ state: 'attached', timeout: 15000 })
+      .catch(() => this.log.warn('navigate', 'Charts genre control not detected yet'))
     return page
   }
 

@@ -40,16 +40,16 @@ a persistent SQLite database.
   (trending) page → apply the geo scope → auto-scroll → collect artist profiles
   → open each profile → "Become a Fan" (save) → set update notifications via the
   Yes/No prompt → verify → repeat until the target is reached.
-- **Trending location control (geo scope)** — ReverbNation's Charts rank artists
-  by scope relative to your account's region: **Global / National / Regional /
-  Local** (applied via the charts `select[name="geo"]`). Mark favorites and
-  switch the active scope from the UI. _Note: the site does not expose arbitrary
-  country/city targeting on Charts, so the four scopes are what's available._
+- **Location search (any city/region/country)** — type an actual place (e.g.
+  “Austin, TX”, “London, UK”); it's geocoded (OpenStreetMap Nominatim) to
+  coordinates and served by ReverbNation's **local charts API**
+  (`/api/charts/local` by latitude/longitude). Plus a built-in **Global** chart.
+  Mark favorites and switch the active location from the UI.
 - **Multi-location cycling** — enable “Cycle through multiple locations” and the
-  engine runs one pass per selected scope in order. `artistsToSave` is the
-  **total** for the run, split evenly across the visited scopes (remainder
-  front-loaded — e.g. 10 artists over 3 scopes → 4 / 3 / 3). Falls back to your
-  favorites (then all scopes) if no explicit cycle list is set.
+  engine runs one pass per selected location in order. `artistsToSave` is the
+  **total** for the run, split evenly across the visited locations (remainder
+  front-loaded — e.g. 10 artists over 3 locations → 4 / 3 / 3). Falls back to your
+  favorites (then all locations) if no explicit cycle list is set.
 - **Resilient engine** — typed retries with exponential backoff, stale-page
   refresh, browser-crash recovery, skip-already-processed, and continue-on-error
   so a single bad artist never aborts a run.
@@ -225,15 +225,13 @@ the automation falls back gracefully. If saves or scans stop working, open
 defaults in [`src/shared/defaults.ts`](src/shared/defaults.ts) are **verified
 against the live site**, and map to how ReverbNation actually works:
 
-| Concern       | Reality on ReverbNation                                                        |
-| ------------- | ----------------------------------------------------------------------------- |
-| Auth          | Logged in ⇒ `a.qa-library` / `a.qa-log-out` present; logged out ⇒ `a.qa-login` |
-| Trending      | The **Charts** page (`/main/charts`), an AngularJS view                        |
-| Location      | `select[name="geo"]` with `global` / `national` / `regional` / `local`         |
-| Artist links  | Single-segment vanity slugs (e.g. `/leelagrant`) in the chart listing          |
-| Save          | "Become a Fan" (`a.button--add--profile`) on the artist profile               |
-| Updates       | The Yes/No prompt (`a.js-fan-action`) shown right after becoming a fan          |
-| Already saved | "Remove Fan" (`a.button--added--profile`) is shown instead                     |
+| Concern       | Reality on ReverbNation                                                          |
+| ------------- | ------------------------------------------------------------------------------- |
+| Auth          | Logged in ⇒ `a.qa-library` / `a.qa-log-out` present; logged out ⇒ `a.qa-login`   |
+| Session       | The **Charts** page (`/main/charts`) is loaded to establish the session + CSRF   |
+| Discovery     | JSON API — `/api/charts/global` and `/api/charts/local` (by lat/lng), paginated + genre-filtered |
+| Location      | Geocode a place → `location[latitude]` / `location[longitude]` on the local API  |
+| Save+updates  | `POST /artist/became_fan_save/artist_<id>?become_a_fan=1&receive_emails=<0\|1>` with the page CSRF token |
 
 ## Testing
 

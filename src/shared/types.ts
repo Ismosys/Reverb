@@ -9,20 +9,32 @@
 /* ------------------------------------------------------------------ */
 
 /**
- * A trending "location" on ReverbNation's Charts. The site exposes a geo *scope*
- * (relative to the account's region) rather than arbitrary places, so a location
- * is one of Global / National / Regional / Local.
+ * A trending "location" the automation targets on ReverbNation's Charts.
+ *
+ * - `global`  — the worldwide chart (ReverbNation `/api/charts/global`).
+ * - `custom`  — an actual place the user searched for; resolved to coordinates
+ *   and served by the local chart (`/api/charts/local` by latitude/longitude).
  */
 export interface TrendingLocation {
-  /** Stable identifier: global | national | regional | local. */
+  /** Stable identifier (e.g. "global" or a slug of the place). */
   id: string
-  /** Human friendly label, e.g. "National". */
+  /** Human friendly label, e.g. "Austin, Texas, United States". */
   label: string
-  type: 'global' | 'national' | 'regional' | 'local'
-  /** The value written to the charts `select[name="geo"]` (e.g. "string:national"). */
-  geoValue: string
+  type: 'global' | 'custom'
+  /** Coordinates for `custom` locations (from geocoding). */
+  latitude?: number
+  longitude?: number
+  /** The original text the user searched, for reference. */
+  query?: string
   /** Marked by the user as a favorite for quick access. */
   favorite?: boolean
+}
+
+/** A geocoded place returned by a location search. */
+export interface GeocodeResult {
+  label: string
+  latitude: number
+  longitude: number
 }
 
 /** Delay range in milliseconds used to randomise pacing. */
@@ -90,30 +102,19 @@ export interface AppConfig {
 }
 
 /**
- * All site-specific coupling lives here so it can be tuned from config without a
- * code change. Values are verified against the live ReverbNation (AngularJS) app.
+ * Site-specific coupling to ReverbNation, kept in config so it can be tuned
+ * without a code change. Discovery uses the JSON charts API and fanning uses the
+ * became-a-fan POST, so only session/auth landing selectors are needed here.
  */
 export interface SiteSelectors {
   baseUrl: string
-  /** The "Trending" page — ReverbNation Charts. */
+  /** The Charts page — used to establish the session and read genre options. */
   chartsPath: string
   loginPath: string
-  /** Present only when logged IN (e.g. My Library / Log Out nav links). */
+  /** Present only when logged IN (My Library / Log Out nav links). */
   loggedInIndicator: string
   /** Present only when logged OUT (the "Log In" nav link). */
   loggedOutIndicator: string
-  /** The geo-scope <select> on the charts page. */
-  geoSelect: string
-  /** Anchors on the charts page that link to an artist's vanity profile. */
-  artistProfileLink: string
-  /** "Become a Fan" control on an artist profile (the save action). */
-  becomeFanButton: string
-  /** "Remove Fan" control — present only when already a fan (already saved). */
-  removeFanButton: string
-  /** "Yes" in the receive-updates prompt shown after becoming a fan. */
-  fanConfirmYes: string
-  /** "No" in the receive-updates prompt. */
-  fanConfirmNo: string
 }
 
 /* ------------------------------------------------------------------ */
@@ -254,6 +255,7 @@ export const IpcChannels = {
   locationSetActive: 'location:setActive',
   locationToggleFavorite: 'location:toggleFavorite',
   locationSetCycle: 'location:setCycle',
+  locationAddByName: 'location:addByName',
   authLogin: 'auth:login',
   authCheck: 'auth:check',
   engineStart: 'engine:start',

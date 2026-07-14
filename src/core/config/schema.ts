@@ -30,8 +30,10 @@ export const automationSchema = z.object({
 export const locationSchema = z.object({
   id: z.string().min(1),
   label: z.string().min(1),
-  type: z.enum(['global', 'national', 'regional', 'local']),
-  geoValue: z.string().min(1),
+  type: z.enum(['global', 'custom']),
+  latitude: z.number().optional(),
+  longitude: z.number().optional(),
+  query: z.string().optional(),
   favorite: z.boolean().optional()
 })
 
@@ -47,13 +49,7 @@ export const siteSchema = z.object({
   chartsPath: z.string(),
   loginPath: z.string(),
   loggedInIndicator: z.string(),
-  loggedOutIndicator: z.string(),
-  geoSelect: z.string(),
-  artistProfileLink: z.string(),
-  becomeFanButton: z.string(),
-  removeFanButton: z.string(),
-  fanConfirmYes: z.string(),
-  fanConfirmNo: z.string()
+  loggedOutIndicator: z.string()
 })
 
 export const appConfigSchema = z.object({

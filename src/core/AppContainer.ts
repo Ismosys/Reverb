@@ -4,7 +4,7 @@ import { Database } from './db/Database'
 import { BrowserManager } from './browser/BrowserManager'
 import { AuthService } from './services/AuthService'
 import { NavigationService } from './services/NavigationService'
-import { LocationManager } from './services/LocationManager'
+import { GeocodingService } from './services/GeocodingService'
 import { TrendingScanner } from './services/TrendingScanner'
 import { LibraryManager } from './services/LibraryManager'
 import { ArtistProcessor } from './services/ArtistProcessor'
@@ -25,7 +25,7 @@ export class AppContainer {
   readonly browser: BrowserManager
   readonly auth: AuthService
   readonly nav: NavigationService
-  readonly location: LocationManager
+  readonly geocoding: GeocodingService
   readonly scanner: TrendingScanner
   readonly library: LibraryManager
   readonly health: HealthMonitor
@@ -43,7 +43,7 @@ export class AppContainer {
     const human = new HumanBehavior(cfg.automation)
     this.auth = new AuthService(this.browser, cfg.site, this.log)
     this.nav = new NavigationService(this.browser, cfg.site, this.log)
-    this.location = new LocationManager(cfg.site, this.log)
+    this.geocoding = new GeocodingService(this.log)
     this.scanner = new TrendingScanner(cfg.site, human, this.log)
     this.library = new LibraryManager(cfg.site, this.log)
     this.report = new ReportService(this.db, cfg.paths.reportsPath, this.log)
@@ -69,7 +69,6 @@ export class AppContainer {
       browser: this.browser,
       auth: this.auth,
       nav: this.nav,
-      location: this.location,
       scanner: this.scanner,
       processorFactory,
       health: this.health,

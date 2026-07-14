@@ -8,7 +8,6 @@ import { Database } from '@core/db/Database'
 import { BrowserManager } from '@core/browser/BrowserManager'
 import { AuthService } from '@core/services/AuthService'
 import { NavigationService } from '@core/services/NavigationService'
-import { LocationManager } from '@core/services/LocationManager'
 import { TrendingScanner } from '@core/services/TrendingScanner'
 import { LibraryManager } from '@core/services/LibraryManager'
 import { ArtistProcessor } from '@core/services/ArtistProcessor'
@@ -35,9 +34,15 @@ describe.skipIf(!RUN)('LIVE ReverbNation end-to-end', () => {
       const config = ConfigManager.load(userDir)
 
       // Point at the copied logged-in profile; small, fast, headless run.
+      // Add a custom location (Austin, TX) and target it — exercises the local
+      // charts API by coordinates.
       config.save({
         ...config.get(),
-        activeLocationId: 'national',
+        locations: [
+          ...config.get().locations,
+          { id: 'austin', label: 'Austin, TX, US', type: 'custom', latitude: 30.2672, longitude: -97.7431, query: 'Austin, TX' }
+        ],
+        activeLocationId: 'austin',
         paths: { ...config.get().paths, browserProfilePath: PROFILE! },
         automation: {
           ...config.get().automation,
@@ -61,7 +66,6 @@ describe.skipIf(!RUN)('LIVE ReverbNation end-to-end', () => {
       const human = new HumanBehavior(cfg.automation)
       const auth = new AuthService(browser, cfg.site, log)
       const nav = new NavigationService(browser, cfg.site, log)
-      const location = new LocationManager(cfg.site, log)
       const scanner = new TrendingScanner(cfg.site, human, log)
       const library = new LibraryManager(cfg.site, log)
       const report = new ReportService(db, cfg.paths.reportsPath, log)
@@ -73,7 +77,6 @@ describe.skipIf(!RUN)('LIVE ReverbNation end-to-end', () => {
         browser,
         auth,
         nav,
-        location,
         scanner,
         processorFactory: () =>
           new ArtistProcessor(browser, db, library, new HumanBehavior(config.get().automation), config.get().automation, log),

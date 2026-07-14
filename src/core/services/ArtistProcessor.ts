@@ -91,12 +91,9 @@ export class ArtistProcessor {
   ): Promise<ArtistRecord> {
     const page = await this.ensureReverbPage(signal)
 
-    // Resolve the real name cheaply (a title fetch, no full navigation).
-    const realName = await this.resolveName(page, artist)
-    if (realName !== artist.name) this.db.updateName(artist.artistId, realName)
-
+    // The scanner already provides the real name from the charts API.
     // Fan the artist (save to library + set updates) via the CSRF POST.
-    const result = await this.library.save(page, { artistId: artist.artistId, name: realName }, this.settings.receiveUpdates)
+    const result = await this.library.save(page, { artistId: artist.artistId, name: artist.name }, this.settings.receiveUpdates)
 
     await this.human.betweenArtists(signal)
 
@@ -108,31 +105,8 @@ export class ArtistProcessor {
       durationMs,
       incrementRetry: attempt > 0
     })
-    this.log.info('artist', `Completed: ${realName}`, { artist: realName, status: 'saved', durationMs })
+    this.log.info('artist', `Completed: ${artist.name}`, { artist: artist.name, status: 'saved', durationMs })
     return record
-  }
-
-  /**
-   * Resolve the artist's display name by fetching its profile HTML `<title>`
-   * from the page context (fast; no rendering). Falls back to any known name or
-   * a stable id-based placeholder.
-   */
-  private async resolveName(page: Page, artist: DiscoveredArtist): Promise<string> {
-    const fallback = artist.name && artist.name.length >= 2 ? artist.name : `Artist ${artist.artistId}`
-    try {
-      const title = await page.evaluate(async (id) => {
-        const g = globalThis as unknown as {
-          fetch: (u: string, o: unknown) => Promise<{ text: () => Promise<string> }>
-        }
-        const html = await g.fetch(`/artist/${id}`, { credentials: 'same-origin' }).then((r) => r.text())
-        const m = html.match(/<title>([^<]*)<\/title>/i)
-        return m ? m[1] : ''
-      }, artist.artistId)
-      const name = title.split('|')[0].trim()
-      return name.length >= 2 ? name : fallback
-    } catch {
-      return fallback
-    }
   }
 
   /** Ensure the shared page is on reverbnation.com so POST/fetch are same-origin. */

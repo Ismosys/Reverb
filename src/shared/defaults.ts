@@ -35,22 +35,12 @@ export const DEFAULT_SITE: SiteSelectors = {
   chartsPath: '/main/charts',
   loginPath: '/login',
   loggedInIndicator: 'a.qa-library, a.qa-log-out, a.qa-user-icon',
-  loggedOutIndicator: 'a.qa-login',
-  geoSelect: 'select[name="geo"]',
-  // Vanity-profile anchors on the charts listing (excluding site routes handled in code).
-  artistProfileLink: 'a[href^="/"]',
-  becomeFanButton: 'a.button--add--profile, a.qa-become-fan, a.ng-scope.button--primary:has-text("Become A Fan")',
-  removeFanButton: 'a.button--added--profile, a:has-text("Remove Fan")',
-  fanConfirmYes: 'a.js-fan-action:has-text("Yes")',
-  fanConfirmNo: 'a.js-fan-action:has-text("No")'
+  loggedOutIndicator: 'a.qa-login'
 }
 
-/** The four geo scopes ReverbNation Charts supports. */
+/** The worldwide chart; users add actual places via location search. */
 export const DEFAULT_LOCATIONS: TrendingLocation[] = [
-  { id: 'global', label: 'Global', type: 'global', geoValue: 'string:global', favorite: true },
-  { id: 'national', label: 'National', type: 'national', geoValue: 'string:national', favorite: true },
-  { id: 'regional', label: 'Regional', type: 'regional', geoValue: 'string:regional' },
-  { id: 'local', label: 'Local', type: 'local', geoValue: 'string:local' }
+  { id: 'global', label: 'Global', type: 'global', favorite: true }
 ]
 
 /** Build a complete default config given resolved paths. */

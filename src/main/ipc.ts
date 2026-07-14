@@ -56,6 +56,23 @@ export function registerIpc(container: AppContainer, getWindow: () => BrowserWin
   ipcMain.handle(IpcChannels.locationSetActive, wrap((_e, id) => config.setActiveLocation(id as string | null)))
   ipcMain.handle(IpcChannels.locationToggleFavorite, wrap((_e, id) => config.toggleFavorite(id as string)))
   ipcMain.handle(IpcChannels.locationSetCycle, wrap((_e, ids) => config.setCycleLocationIds((ids as string[]) ?? [])))
+  ipcMain.handle(
+    IpcChannels.locationAddByName,
+    wrap(async (_e, query) => {
+      const geo = await container.geocoding.geocode(query as string)
+      const id = `loc-${geo.label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60)}`
+      const location: TrendingLocation = {
+        id,
+        label: geo.label,
+        type: 'custom',
+        latitude: geo.latitude,
+        longitude: geo.longitude,
+        query: query as string
+      }
+      config.addLocation(location)
+      return config.setActiveLocation(id)
+    })
+  )
 
   /* ------------------------------ Auth -------------------------------- */
   ipcMain.handle(

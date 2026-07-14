@@ -12,7 +12,6 @@ import type { Logger } from '../logging/Logger'
 import type { BrowserManager } from '../browser/BrowserManager'
 import type { AuthService } from '../services/AuthService'
 import type { NavigationService } from '../services/NavigationService'
-import type { LocationManager } from '../services/LocationManager'
 import type { TrendingScanner } from '../services/TrendingScanner'
 import type { ArtistProcessor } from '../services/ArtistProcessor'
 import type { HealthMonitor } from '../health/HealthMonitor'
@@ -29,7 +28,6 @@ export interface EngineDeps {
   browser: BrowserManager
   auth: AuthService
   nav: NavigationService
-  location: LocationManager
   scanner: TrendingScanner
   processorFactory: () => ArtistProcessor
   health: HealthMonitor
@@ -272,26 +270,21 @@ export class AutomationEngine extends TypedEmitter<EngineEvents> {
     settings: AutomationSettings,
     passTarget: number
   ): Promise<void> {
-    // Navigate to Trending in the Community.
+    // Navigate to the Charts page to establish the authenticated session/CSRF
+    // context the charts API and fan POST run within.
     this.setState('navigating')
-    this.setOperation('Opening Trending in the Community')
+    this.setOperation('Opening Charts')
     const page = await this.deps.nav.gotoTrending({ retries: settings.maxRetries, signal: this.signal })
 
-    // Apply the trending location for this pass.
-    if (location) {
-      this.setOperation(`Applying location: ${location.label}`)
-      await this.deps.location.apply(page, location, this.signal)
-    }
-
-    // Scroll + scan until enough artists for this pass are loaded.
+    // Discover artists for this location via the charts API.
     this.setState('scanning')
-    this.setOperation('Scanning trending artists')
+    this.setOperation(`Scanning charts: ${location?.label ?? 'Global'}`)
     const discovered = await this.deps.scanner.scan(page, {
       target: passTarget,
-      maxScrollPages: settings.maxScrollPages,
+      location,
       signal: this.signal
     })
-    this.deps.log.info('engine', `Discovered ${discovered.length} artist(s) at ${location?.label ?? 'default'}`)
+    this.deps.log.info('engine', `Discovered ${discovered.length} artist(s) at ${location?.label ?? 'Global'}`)
 
     // Process artists until this pass's target is reached or the list is exhausted.
     this.setState('processing')

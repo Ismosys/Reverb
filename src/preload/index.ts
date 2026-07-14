@@ -32,7 +32,9 @@ const api = {
       ipcRenderer.invoke(IpcChannels.locationSetActive, id),
     toggleFavorite: (id: string): Promise<IpcResult<AppConfig>> =>
       ipcRenderer.invoke(IpcChannels.locationToggleFavorite, id),
-    setCycle: (ids: string[]): Promise<IpcResult<AppConfig>> => ipcRenderer.invoke(IpcChannels.locationSetCycle, ids)
+    setCycle: (ids: string[]): Promise<IpcResult<AppConfig>> => ipcRenderer.invoke(IpcChannels.locationSetCycle, ids),
+    addByName: (query: string): Promise<IpcResult<AppConfig>> =>
+      ipcRenderer.invoke(IpcChannels.locationAddByName, query)
   },
   auth: {
     login: (): Promise<IpcResult<AuthStatus>> => ipcRenderer.invoke(IpcChannels.authLogin),
