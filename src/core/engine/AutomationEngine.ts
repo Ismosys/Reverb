@@ -12,7 +12,8 @@ import type { Logger } from '../logging/Logger'
 import type { BrowserManager } from '../browser/BrowserManager'
 import type { AuthService } from '../services/AuthService'
 import type { NavigationService } from '../services/NavigationService'
-import type { TrendingScanner } from '../services/TrendingScanner'
+import type { Page } from 'playwright'
+import type { DiscoveredArtist, TrendingScanner } from '../services/TrendingScanner'
 import type { ArtistProcessor } from '../services/ArtistProcessor'
 import type { HealthMonitor } from '../health/HealthMonitor'
 import type { ReportService } from '../reporting/ReportService'
@@ -20,6 +21,16 @@ import { TypedEmitter } from '../utils/events'
 import { sleep } from '../utils/async'
 import { splitEvenly } from '../utils/numbers'
 import { AppError, AuthenticationError, toMessage } from '../utils/errors'
+
+/** Per-location-pass working state. */
+interface PassContext {
+  location: TrendingLocation | null
+  passTarget: number
+  settings: AutomationSettings
+  processor: ArtistProcessor
+  locationLabel: string | null
+  savedThisPass: number
+}
 
 export interface EngineDeps {
   config: ConfigManager
@@ -56,6 +67,7 @@ export class AutomationEngine extends TypedEmitter<EngineEvents> {
   private runLocations: TrendingLocation[] = []
   private runLabel: string | null = null
   private currentArtist: string | null = null
+  private currentArtistNumber = 0
   private currentOperation: string | null = null
   private consecutiveFailures = 0
 
@@ -97,6 +109,7 @@ export class AutomationEngine extends TypedEmitter<EngineEvents> {
       skipped: this.skipped,
       failed: this.failed,
       currentArtist: this.currentArtist,
+      currentArtistNumber: this.currentArtistNumber,
       currentOperation: this.currentOperation,
       progress: this.target > 0 ? Math.min(1, this.saved / this.target) : 0,
       elapsedMs,
@@ -270,64 +283,118 @@ export class AutomationEngine extends TypedEmitter<EngineEvents> {
     settings: AutomationSettings,
     passTarget: number
   ): Promise<void> {
-    // Navigate to the Charts page to establish the authenticated session/CSRF
-    // context the charts API and fan POST run within.
+    // Navigate to the Charts page — the "Trending in the Community" list — which
+    // establishes the authenticated session and hosts the row menus.
     this.setState('navigating')
-    this.setOperation('Opening Charts')
+    this.setOperation('Opening Trending in the Community')
     const page = await this.deps.nav.gotoTrending({ retries: settings.maxRetries, signal: this.signal })
 
-    // Discover artists for this location via the charts API.
-    this.setState('scanning')
-    this.setOperation(`Scanning charts: ${location?.label ?? 'Global'}`)
-    const discovered = await this.deps.scanner.scan(page, {
-      target: passTarget,
-      location,
-      signal: this.signal
-    })
-    this.deps.log.info('engine', `Discovered ${discovered.length} artist(s) at ${location?.label ?? 'Global'}`)
-
-    // Process artists until this pass's target is reached or the list is exhausted.
-    this.setState('processing')
     const processor = this.deps.processorFactory()
     const locationLabel = location?.label ?? null
-    let savedThisPass = 0
+    const pass = { location, passTarget, settings, processor, locationLabel, savedThisPass: 0 }
 
+    if (location?.type === 'custom') {
+      await this.processCustomLocation(page, pass)
+    } else {
+      await this.processCommunityRows(page, pass)
+    }
+    this.currentArtist = null
+    this.setOperation(null)
+  }
+
+  /**
+   * Drive the on-page community list exactly like a human: process the visible
+   * rows top-to-bottom (three-dot menu → Add to Library → confirm → Yes), then
+   * scroll/paginate for more. Never processes the same artist twice.
+   */
+  private async processCommunityRows(page: Page, pass: PassContext): Promise<void> {
+    this.setState('scanning')
+    const seen = new Set<string>()
+    let emptyRounds = 0
+
+    while (!this.signal.aborted && !this.passDone(pass)) {
+      const rows = (await this.deps.scanner.readRows(page)).filter((r) => !seen.has(r.artistId))
+      if (rows.length === 0) {
+        // All visible rows processed → scroll for more.
+        this.setState('scanning')
+        this.setOperation('Scrolling…')
+        const more = await this.deps.scanner.nextPage(page, this.signal)
+        if (!more && ++emptyRounds >= 2) break
+        continue
+      }
+      emptyRounds = 0
+
+      this.setState('processing')
+      for (const artist of rows) {
+        if (this.signal.aborted || this.passDone(pass)) break
+        await this.waitWhilePaused()
+        if (this.signal.aborted) break
+        seen.add(artist.artistId)
+        await this.processOne(artist, pass, 'row')
+      }
+    }
+  }
+
+  /** Custom locations: fan each discovered artist via their profile page. */
+  private async processCustomLocation(page: Page, pass: PassContext): Promise<void> {
+    this.setState('scanning')
+    this.setOperation(`Scanning ${pass.location?.label ?? 'location'}…`)
+    const discovered = await this.deps.scanner.scanApi(page, {
+      target: pass.passTarget,
+      location: pass.location!,
+      signal: this.signal
+    })
+    this.deps.log.info('engine', `Discovered ${discovered.length} artist(s) at ${pass.location?.label}`)
+
+    this.setState('processing')
     for (const artist of discovered) {
-      if (this.signal.aborted) break
+      if (this.signal.aborted || this.passDone(pass)) break
       await this.waitWhilePaused()
       if (this.signal.aborted) break
-
-      if (savedThisPass >= passTarget || this.saved >= this.target) {
-        this.deps.log.info('engine', 'Location target reached; moving on')
-        break
-      }
-      if (settings.stopAfterFailures > 0 && this.consecutiveFailures >= settings.stopAfterFailures) {
-        this.deps.log.error('engine', `Stopping after ${this.consecutiveFailures} consecutive failures`)
-        break
-      }
-
-      this.currentArtist = artist.name
-      this.setOperation(`Processing ${artist.name}`)
-
-      const result = await processor.process(artist, locationLabel, this.signal)
-      this.processed++
-      switch (result.outcome) {
-        case 'saved':
-          this.saved++
-          savedThisPass++
-          this.consecutiveFailures = 0
-          break
-        case 'skipped':
-          this.skipped++
-          break
-        case 'failed':
-          this.failed++
-          this.consecutiveFailures++
-          break
-      }
-      this.emitArtist(result.record.artistId)
-      this.push()
+      await this.processOne(artist, pass, 'profile')
     }
+  }
+
+  /** Process a single artist and fold the outcome into run statistics. */
+  private async processOne(artist: DiscoveredArtist, pass: PassContext, mode: 'row' | 'profile'): Promise<void> {
+    this.currentArtist = artist.name
+    this.currentArtistNumber = this.processed + 1
+    this.setOperation(`${artist.name}`)
+
+    const result = await pass.processor.process(artist, {
+      mode,
+      locationLabel: pass.locationLabel,
+      knownSaved: mode === 'row' ? artist.alreadySaved : false,
+      signal: this.signal,
+      onStatus: (msg) => this.setOperation(`${artist.name} — ${msg}`)
+    })
+    this.processed++
+    switch (result.outcome) {
+      case 'saved':
+        this.saved++
+        pass.savedThisPass++
+        this.consecutiveFailures = 0
+        break
+      case 'skipped':
+        this.skipped++
+        break
+      case 'failed':
+        this.failed++
+        this.consecutiveFailures++
+        break
+    }
+    this.emitArtist(result.record.artistId)
+    this.push()
+  }
+
+  /** Whether the current pass has hit its target or the failure ceiling. */
+  private passDone(pass: PassContext): boolean {
+    if (pass.savedThisPass >= pass.passTarget || this.saved >= this.target) return true
+    if (pass.settings.stopAfterFailures > 0 && this.consecutiveFailures >= pass.settings.stopAfterFailures) {
+      this.deps.log.error('engine', `Stopping after ${this.consecutiveFailures} consecutive failures`)
+      return true
+    }
+    return false
   }
 
   private artistListeners = new Set<(artistId: string) => void>()
@@ -374,6 +441,7 @@ export class AutomationEngine extends TypedEmitter<EngineEvents> {
     this.failed = 0
     this.consecutiveFailures = 0
     this.currentArtist = null
+    this.currentArtistNumber = 0
     this.currentOperation = null
     this.paused = false
   }

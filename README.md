@@ -36,10 +36,14 @@ a persistent SQLite database.
 - **Persistent authentication** — log in once in a real browser window; the
   Playwright persistent profile keeps the session across restarts. Expired
   sessions are detected and you're prompted to re-authenticate only when needed.
-- **Full automation workflow** — launch → authenticate → open the Charts
-  (trending) page → apply the geo scope → auto-scroll → collect artist profiles
-  → open each profile → "Become a Fan" (save) → set update notifications via the
-  Yes/No prompt → verify → repeat until the target is reached.
+- **Exact "Trending in the Community" interaction** — the automation replicates
+  the real on-screen workflow, human-paced, one artist at a time: open the row's
+  **three-dot menu** → click **"Add to Library"** → wait for the confirmation
+  **toast** → answer the **"Receive Updates?"** dialog with **Yes** → wait for it
+  to dismiss → next artist. Already-in-library rows are detected from the row
+  state and skipped (no menu, no error). When the visible rows are done it loads
+  more. Uses intelligent waits (`waitForSelector` / `waitForFunction`) over fixed
+  sleeps, never overlaps clicks, and retries transient UI failures.
 - **Location search (any city/region/country)** — type an actual place (e.g.
   “Austin, TX”, “London, UK”); it's geocoded (OpenStreetMap Nominatim) to
   coordinates and served by ReverbNation's **local charts API**
@@ -228,10 +232,13 @@ against the live site**, and map to how ReverbNation actually works:
 | Concern       | Reality on ReverbNation                                                          |
 | ------------- | ------------------------------------------------------------------------------- |
 | Auth          | Logged in ⇒ `a.qa-library` / `a.qa-log-out` present; logged out ⇒ `a.qa-login`   |
-| Session       | The **Charts** page (`/main/charts`) is loaded to establish the session + CSRF   |
-| Discovery     | JSON API — `/api/charts/global` and `/api/charts/local` (by lat/lng), paginated + genre-filtered |
-| Location      | Geocode a place → `location[latitude]` / `location[longitude]` on the local API  |
-| Save+updates  | `POST /artist/became_fan_save/artist_<id>?become_a_fan=1&receive_emails=<0\|1>` with the page CSRF token |
+| Trending list | The **Charts** community list (`/main/charts`); rows carry a `charts_artist_<id>` dropdown |
+| Row menu      | Trigger `a[data-dropdown="charts_artist_<id>"]` → dropdown `#charts_artist_<id>`  |
+| Add to Library| `#charts_artist_<id> a[data-fan-action="add"]` ("Save"); hidden (`.hide`) when already a fan |
+| Confirmation  | Toast text "…has been added to your Library"; then the "Receive Updates?" dialog |
+| Yes / No      | `a[href*="became_fan_save/artist_<id>"][receive_emails=1\|0]`                     |
+| More rows     | Paginate via `a.qa-next-page` (waits for the first row id to change)              |
+| Custom location| JSON API `/api/charts/local` (by lat/lng) → fan each via their profile page      |
 
 ## Testing
 

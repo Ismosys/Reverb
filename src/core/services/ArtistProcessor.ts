@@ -4,7 +4,7 @@ import type { BrowserManager } from '../browser/BrowserManager'
 import type { Database } from '../db/Database'
 import type { Logger } from '../logging/Logger'
 import type { DiscoveredArtist } from './TrendingScanner'
-import type { LibraryManager } from './LibraryManager'
+import type { LibraryManager, SaveResult, StatusReporter } from './LibraryManager'
 import type { HumanBehavior } from './HumanBehavior'
 import { withRetry } from '../utils/async'
 import { AppError, toMessage } from '../utils/errors'
@@ -16,11 +16,21 @@ export interface ProcessResult {
   record: ArtistRecord
 }
 
+export interface ProcessOptions {
+  /** 'row' drives the on-page three-dot menu; 'profile' visits the profile. */
+  mode: 'row' | 'profile'
+  locationLabel: string | null
+  /** The row already shows as saved — skip without opening its menu. */
+  knownSaved?: boolean
+  onStatus?: StatusReporter
+  signal?: AbortSignal
+}
+
 /**
- * Processes a single artist end-to-end: skip-if-done, open profile, save,
- * enable updates, verify, and persist the outcome. All transient failures are
- * retried; a non-recoverable failure is recorded and returned rather than
- * thrown, so one bad artist never aborts the run.
+ * Processes a single artist end-to-end: skip-if-done, run the human-paced DOM
+ * "Add to Library" interaction (retried on transient UI failures), verify, and
+ * persist the outcome. One bad artist never aborts the run — failures are
+ * recorded and returned, not thrown.
  */
 export class ArtistProcessor {
   constructor(
@@ -32,37 +42,53 @@ export class ArtistProcessor {
     private readonly log: Logger
   ) {}
 
-  async process(
-    artist: DiscoveredArtist,
-    locationLabel: string | null,
-    signal?: AbortSignal
-  ): Promise<ProcessResult> {
+  async process(artist: DiscoveredArtist, opts: ProcessOptions): Promise<ProcessResult> {
     const startedAt = Date.now()
+    const status = opts.onStatus ?? (() => undefined)
 
-    // 1. Persist discovery and short-circuit if already completed.
-    const existing = this.db.upsertDiscovered({ ...artist, locationLabel })
+    // Persist discovery; short-circuit if already completed in a prior run,
+    // or if the row already shows as in the library (no menu needed).
+    const existing = this.db.upsertDiscovered({ ...artist, locationLabel: opts.locationLabel })
     if (existing.status === 'saved') {
-      this.log.info('artist', `Skip (already saved): ${artist.name}`, { artist: artist.name, status: 'skipped' })
+      status('Already in library')
       return { outcome: 'skipped', record: existing }
     }
-
+    if (opts.knownSaved) {
+      status('Already in library')
+      this.log.info('artist', `Skip (already in library): ${artist.name}`, { artist: artist.name, status: 'skipped' })
+      const record = this.db.markResult(artist.artistId, {
+        status: 'skipped',
+        updatesEnabled: true,
+        failureReason: null,
+        durationMs: 0
+      })
+      return { outcome: 'skipped', record }
+    }
     this.db.markProcessing(artist.artistId)
 
     try {
-      const record = await withRetry(
-        async (attempt) => this.attempt(artist, startedAt, attempt, signal),
-        {
-          retries: this.settings.maxRetries,
-          signal,
-          shouldRetry: (err) => !(err instanceof AppError && err.recoverable === false),
-          onRetry: (attempt, err) =>
-            this.log.warn('artist', `Retry ${attempt} for ${artist.name}`, {
-              artist: artist.name,
-              retryCount: attempt,
-              error: toMessage(err)
-            })
-        }
-      )
+      const { result, attempts } = await this.runWithRetries(artist, opts, startedAt)
+      const durationMs = Date.now() - startedAt
+
+      if (result.outcome === 'skipped') {
+        const record = this.db.markResult(artist.artistId, {
+          status: 'skipped',
+          updatesEnabled: result.updatesEnabled,
+          failureReason: null,
+          durationMs,
+          incrementRetry: attempts > 0
+        })
+        return { outcome: 'skipped', record }
+      }
+
+      const record = this.db.markResult(artist.artistId, {
+        status: 'saved',
+        updatesEnabled: result.updatesEnabled,
+        failureReason: null,
+        durationMs,
+        incrementRetry: attempts > 0
+      })
+      this.log.info('artist', `Completed: ${artist.name}`, { artist: artist.name, status: 'saved', durationMs })
       return { outcome: 'saved', record }
     } catch (err) {
       const durationMs = Date.now() - startedAt
@@ -82,34 +108,55 @@ export class ArtistProcessor {
     }
   }
 
-  /** One fan attempt. Throws on failure so withRetry can retry. */
-  private async attempt(
+  /** Run the chosen DOM flow, retrying transient UI failures. */
+  private async runWithRetries(
     artist: DiscoveredArtist,
-    startedAt: number,
-    attempt: number,
-    signal?: AbortSignal
-  ): Promise<ArtistRecord> {
-    const page = await this.ensureReverbPage(signal)
-
-    // The scanner already provides the real name from the charts API.
-    // Fan the artist (save to library + set updates) via the CSRF POST.
-    const result = await this.library.save(page, { artistId: artist.artistId, name: artist.name }, this.settings.receiveUpdates)
-
-    await this.human.betweenArtists(signal)
-
-    const durationMs = Date.now() - startedAt
-    const record = this.db.markResult(artist.artistId, {
-      status: 'saved',
-      updatesEnabled: result.updatesEnabled,
-      failureReason: null,
-      durationMs,
-      incrementRetry: attempt > 0
-    })
-    this.log.info('artist', `Completed: ${artist.name}`, { artist: artist.name, status: 'saved', durationMs })
-    return record
+    opts: ProcessOptions,
+    _startedAt: number
+  ): Promise<{ result: SaveResult; attempts: number }> {
+    let attempts = 0
+    const result = await withRetry(
+      async (attempt) => {
+        attempts = attempt
+        const page = await this.ensureReverbPage(opts.signal)
+        const save: SaveResult =
+          opts.mode === 'row'
+            ? await this.library.addViaRowMenu(page, { id: artist.artistId, name: artist.name }, this.saveOpts(opts))
+            : await this.library.addViaProfile(
+                page,
+                { id: artist.artistId, name: artist.name, profileUrl: artist.profileUrl },
+                this.saveOpts(opts)
+              )
+        // Pace between artists (human-like) after a successful action.
+        if (save.outcome === 'saved') await this.human.betweenArtists(opts.signal)
+        return save
+      },
+      {
+        retries: this.settings.maxRetries,
+        signal: opts.signal,
+        shouldRetry: (err) => !(err instanceof AppError && err.recoverable === false),
+        onRetry: (attempt, err) => {
+          opts.onStatus?.(`Retrying (${attempt})…`)
+          this.log.warn('artist', `Retry ${attempt} for ${artist.name}`, {
+            artist: artist.name,
+            retryCount: attempt,
+            error: toMessage(err)
+          })
+        }
+      }
+    )
+    return { result, attempts }
   }
 
-  /** Ensure the shared page is on reverbnation.com so POST/fetch are same-origin. */
+  private saveOpts(opts: ProcessOptions) {
+    return {
+      receiveUpdates: this.settings.receiveUpdates,
+      onStatus: opts.onStatus,
+      signal: opts.signal
+    }
+  }
+
+  /** Ensure the shared page is on reverbnation.com for same-origin actions. */
   private async ensureReverbPage(signal?: AbortSignal): Promise<Page> {
     const page = await this.browser.getPage()
     if (!/reverbnation\.com/.test(page.url())) {

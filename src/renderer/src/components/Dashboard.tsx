@@ -43,7 +43,9 @@ export function Dashboard({
               {s?.currentOperation ?? 'Ready to start'}
             </div>
             <div className="muted" style={{ marginTop: 4 }}>
-              {s?.currentArtist ? `Current artist: ${s.currentArtist}` : 'No artist in progress'}
+              {s?.currentArtist
+                ? `Artist #${s.currentArtistNumber || s.processed + 1}: ${s.currentArtist}`
+                : 'No artist in progress'}
             </div>
           </div>
           <div style={{ textAlign: 'right' }}>

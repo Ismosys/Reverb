@@ -180,6 +180,8 @@ export interface RunStatus {
   skipped: number
   failed: number
   currentArtist: string | null
+  /** 1-based index of the artist currently being processed. */
+  currentArtistNumber: number
   currentOperation: string | null
   /** Whole-run progress 0..1. */
   progress: number

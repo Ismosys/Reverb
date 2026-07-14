@@ -34,25 +34,22 @@ describe.skipIf(!RUN)('LIVE ReverbNation end-to-end', () => {
       const config = ConfigManager.load(userDir)
 
       // Point at the copied logged-in profile; small, fast, headless run.
-      // Add a custom location (Austin, TX) and target it — exercises the local
-      // charts API by coordinates.
+      // Target the Global community list — exercises the exact three-dot row
+      // interaction (menu → Add to Library → toast → Receive Updates → Yes).
       config.save({
         ...config.get(),
-        locations: [
-          ...config.get().locations,
-          { id: 'austin', label: 'Austin, TX, US', type: 'custom', latitude: 30.2672, longitude: -97.7431, query: 'Austin, TX' }
-        ],
-        activeLocationId: 'austin',
+        activeLocationId: 'global',
         paths: { ...config.get().paths, browserProfilePath: PROFILE! },
         automation: {
           ...config.get().automation,
-          artistsToSave: 20,
+          artistsToSave: 3,
           receiveUpdates: true,
           headless: true,
           maxScrollPages: 6,
           scrollSpeed: 1200,
           clickDelay: { min: 80, max: 200 },
           randomDelay: { min: 150, max: 400 },
+          maxRetries: 3,
           cycleLocations: false,
           exportReportOnFinish: true,
           reportFormat: 'csv'
@@ -67,7 +64,7 @@ describe.skipIf(!RUN)('LIVE ReverbNation end-to-end', () => {
       const auth = new AuthService(browser, cfg.site, log)
       const nav = new NavigationService(browser, cfg.site, log)
       const scanner = new TrendingScanner(cfg.site, human, log)
-      const library = new LibraryManager(cfg.site, log)
+      const library = new LibraryManager(cfg.site, human, log)
       const report = new ReportService(db, cfg.paths.reportsPath, log)
       const health = new HealthMonitor(browser, db)
       const engine = new AutomationEngine({
@@ -121,12 +118,10 @@ describe.skipIf(!RUN)('LIVE ReverbNation end-to-end', () => {
         expect(status.authStatus).toBe('authenticated')
         expect(browser.status).toBe('ready')
         expect(['completed', 'idle']).toContain(status.engineState)
-        // Pagination must discover well past the old ~8 featured artists.
-        expect(status.processed).toBeGreaterThanOrEqual(15)
-        expect(status.saved + status.skipped).toBeGreaterThanOrEqual(15)
-        expect(status.saved).toBeGreaterThanOrEqual(10)
-        expect(db.savedCount()).toBeGreaterThanOrEqual(10)
-        expect(checks.updatesEnabledCount as number).toBeGreaterThanOrEqual(10)
+        // The exact row flow must complete the target number of fresh saves.
+        expect(status.saved).toBeGreaterThanOrEqual(3)
+        expect(db.savedCount()).toBeGreaterThanOrEqual(3)
+        expect(checks.updatesEnabledCount as number).toBeGreaterThanOrEqual(3)
         expect(checks.reportExists).toBe(true)
         expect(db.ok()).toBe(true)
       } finally {

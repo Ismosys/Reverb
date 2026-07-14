@@ -4,16 +4,16 @@ import type { Logger } from '../logging/Logger'
 import type { HumanBehavior } from './HumanBehavior'
 import { sleep } from '../utils/async'
 
-/** A lightweight artist descriptor from the charts API. */
+/** A lightweight artist descriptor. */
 export interface DiscoveredArtist {
-  /** Numeric ReverbNation artist id. */
   artistId: string
   name: string
-  /** Canonical profile URL (vanity slug, or `/artist/<id>` fallback). */
   profileUrl: string
+  /** For on-page rows: whether the row already shows as in the library. */
+  alreadySaved?: boolean
 }
 
-/** One row from `/api/charts/*`. */
+/** One row from `/api/charts/*` (used for custom-location discovery). */
 interface ChartResult {
   id: number
   name?: string
@@ -21,15 +21,13 @@ interface ChartResult {
 }
 
 /**
- * Discovers trending artists via ReverbNation's JSON charts API — far more
- * robust than scraping the AngularJS DOM.
+ * Discovers trending artists.
  *
- * - **Global** location → `/api/charts/global?page=N&genre=G`
- * - **Custom** location → `/api/charts/local?location[latitude]=..&location[longitude]=..&page=N&genre=G`
- *
- * Each page returns ~10 artists (id, name, vanity slug). We paginate, then
- * iterate genres, accumulating distinct artists until the target is met or the
- * source is exhausted. All requests run in the authenticated page context.
+ * - For the community/global list we read the rendered chart rows in order (so
+ *   the automation can drive their on-page menus exactly like a human) and
+ *   paginate for more — mirroring the reference recording's scroll-to-load.
+ * - For a custom location we use ReverbNation's local charts JSON API keyed by
+ *   coordinates (there is no on-page list for arbitrary places).
  */
 export class TrendingScanner {
   private static readonly MAX_PAGES_PER_GENRE = 60
@@ -42,60 +40,114 @@ export class TrendingScanner {
     void this._human
   }
 
-  async scan(
+  /* ------------------- On-page community rows (DOM) ------------------- */
+
+  /** Read the currently-rendered chart rows, in top-to-bottom order. */
+  async readRows(page: Page): Promise<DiscoveredArtist[]> {
+    const base = this.site.baseUrl
+    const rows = await page
+      .evaluate(() => {
+        type El = {
+          id: string
+          className: string
+          closest: (s: string) => El | null
+          querySelector: (s: string) => El | null
+          textContent: string | null
+        }
+        const g = globalThis as unknown as { document: { querySelectorAll: (s: string) => ArrayLike<El> } }
+        const out: Array<{ id: string; name: string; alreadySaved: boolean }> = []
+        const seen = new Set<string>()
+        const dropdowns = Array.from(g.document.querySelectorAll('ul[id^="charts_artist_"]'))
+        for (const ul of dropdowns) {
+          const id = ul.id.replace('charts_artist_', '')
+          if (!id || seen.has(id)) continue
+          seen.add(id)
+          const row = ul.closest('.slat, .community-trending-chart-item, .chart-item, [class*="chart-item"], li, .row')
+          const nameEl = row?.querySelector('.chart-item-title span, .h5-size.text-default, .primary, [class*="artist-name"], .name')
+          const name = (nameEl?.textContent || '').trim().split('\n')[0].trim()
+          // The "Save"/Add link carries class "hide" once the artist is a fan.
+          const addLink = (row ?? ul).querySelector('a[data-fan-action="add"]')
+          const alreadySaved = !!addLink && addLink.className.split(' ').includes('hide')
+          out.push({ id, name: name.length > 1 ? name : `Artist ${id}`, alreadySaved })
+        }
+        return out
+      })
+      .catch(() => [] as Array<{ id: string; name: string; alreadySaved: boolean }>)
+
+    return rows.map((r) => ({
+      artistId: r.id,
+      name: r.name,
+      profileUrl: `${base}/artist/${r.id}`,
+      alreadySaved: r.alreadySaved
+    }))
+  }
+
+  /** Advance to the next page of rows; returns true if the list changed. */
+  async nextPage(page: Page, signal?: AbortSignal): Promise<boolean> {
+    // Close any lingering dropdown without navigating (Escape only).
+    await page.keyboard.press('Escape').catch(() => undefined)
+    const next = page.locator('a.qa-next-page').first()
+    if (!(await next.isVisible().catch(() => false))) return false
+    const firstBefore = (await this.readRows(page))[0]?.artistId ?? null
+    await next.scrollIntoViewIfNeeded({ timeout: 4000 }).catch(() => undefined)
+    await next.click({ timeout: 6000 }).catch(async () => {
+      await next.click({ timeout: 4000, force: true }).catch(() => undefined)
+    })
+    // Intelligent wait: the first row id should change.
+    await page
+      .waitForFunction(
+        (prev) => {
+          const g = globalThis as unknown as { document: { querySelector: (s: string) => { id: string } | null } }
+          const first = g.document.querySelector('ul[id^="charts_artist_"]')
+          const id = first ? first.id.replace('charts_artist_', '') || null : null
+          return id !== null && id !== prev
+        },
+        firstBefore,
+        { timeout: 8000, polling: 250 }
+      )
+      .catch(() => undefined)
+    await sleep(400, signal).catch(() => undefined)
+    const firstAfter = (await this.readRows(page))[0]?.artistId ?? null
+    return firstAfter !== null && firstAfter !== firstBefore
+  }
+
+  /* --------------------- Custom location (JSON API) -------------------- */
+
+  /** Discover artists for a custom (coordinate) location via the charts API. */
+  async scanApi(
     page: Page,
-    opts: { target: number; location: TrendingLocation | null; signal?: AbortSignal }
+    opts: { target: number; location: TrendingLocation; signal?: AbortSignal }
   ): Promise<DiscoveredArtist[]> {
     const found = new Map<string, DiscoveredArtist>()
-    const genres = ['', ...(await this.genreValues(page))] // '' = All Genres
-    const scope = opts.location?.type === 'custom' ? `local (${opts.location.label})` : 'global'
-    this.log.info('scan', `Charts API scan: target ${opts.target}, scope ${scope}, ${genres.length} genre bucket(s)`)
+    const genres = ['', ...(await this.genreValues(page))]
+    this.log.info('scan', `Local charts API scan for ${opts.location.label} (target ${opts.target})`)
 
     for (const genre of genres) {
       if (found.size >= opts.target || opts.signal?.aborted) break
       for (let pageNum = 1; pageNum <= TrendingScanner.MAX_PAGES_PER_GENRE; pageNum++) {
         if (found.size >= opts.target || opts.signal?.aborted) break
-        const artists = await this.fetchPage(page, opts.location, genre, pageNum)
+        const artists = await this.fetchApiPage(page, opts.location, genre, pageNum)
         if (artists.length === 0) break
         let added = 0
-        for (const a of artists) {
-          if (!found.has(a.artistId)) {
-            found.set(a.artistId, a)
-            added++
-          }
-        }
-        // No new artists on a later page → this bucket is exhausted.
+        for (const a of artists) if (!found.has(a.artistId)) (found.set(a.artistId, a), added++)
         if (added === 0 && pageNum > 1) break
         await sleep(150, opts.signal)
       }
-      if (genre) this.log.info('scan', `After genre "${genre}": ${found.size}/${opts.target}`)
     }
-
-    const result = Array.from(found.values()).slice(0, opts.target)
-    this.log.info('scan', `Scan complete: ${result.length} artist(s)`, {
-      status: result.length >= opts.target ? 'ok' : 'partial'
-    })
-    return result
+    return Array.from(found.values()).slice(0, opts.target)
   }
 
-  /** Fetch one chart page and map it to artists. Returns [] on any error. */
-  private async fetchPage(
+  private async fetchApiPage(
     page: Page,
-    location: TrendingLocation | null,
+    location: TrendingLocation,
     genre: string,
     pageNum: number
   ): Promise<DiscoveredArtist[]> {
     const params = [`page=${pageNum}`]
     if (genre) params.push(`genre=${encodeURIComponent(genre)}`)
-
-    let path: string
-    if (location?.type === 'custom' && Number.isFinite(location.latitude) && Number.isFinite(location.longitude)) {
-      path =
-        `/api/charts/local?location[latitude]=${location.latitude}` +
-        `&location[longitude]=${location.longitude}&${params.join('&')}`
-    } else {
-      path = `/api/charts/global?${params.join('&')}`
-    }
+    const path =
+      `/api/charts/local?location[latitude]=${location.latitude}` +
+      `&location[longitude]=${location.longitude}&${params.join('&')}`
 
     const results = await page
       .evaluate(async (url: string) => {
@@ -123,7 +175,6 @@ export class TrendingScanner {
       }))
   }
 
-  /** Read genre values from the charts DOM (stripping the AngularJS prefix). */
   private async genreValues(page: Page): Promise<string[]> {
     const values = await page
       .evaluate(() => {
@@ -135,8 +186,6 @@ export class TrendingScanner {
         return Array.from(sel.options).map((o) => o.value)
       })
       .catch(() => [] as string[])
-    return values
-      .map((v) => v.replace(/^string:/, ''))
-      .filter((v) => v && v !== 'all')
+    return values.map((v) => v.replace(/^string:/, '')).filter((v) => v && v !== 'all')
   }
 }
