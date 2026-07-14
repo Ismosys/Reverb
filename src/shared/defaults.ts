@@ -20,6 +20,7 @@ export const DEFAULT_AUTOMATION: AutomationSettings = {
   resumePreviousSession: true,
   stopAfterFailures: 10,
   cycleLocations: false,
+  turbo: true,
   exportReportOnFinish: true,
   reportFormat: 'csv'
 }

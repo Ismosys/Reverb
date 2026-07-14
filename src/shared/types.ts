@@ -72,6 +72,9 @@ export interface AutomationSettings {
   /** When true, the run cycles through `cycleLocationIds`, targeting
    *  `artistsToSave` artists at EACH location in turn. */
   cycleLocations: boolean
+  /** Turbo mode: minimal pacing delays for maximum throughput (same on-screen
+   *  interaction, just not padded). Trades human-like pacing for speed. */
+  turbo: boolean
   /** Automatically export a report when the run finishes. */
   exportReportOnFinish: boolean
   /** Report format used for the auto-export. */

@@ -41,9 +41,15 @@ a persistent SQLite database.
   **three-dot menu** → click **"Add to Library"** → wait for the confirmation
   **toast** → answer the **"Receive Updates?"** dialog with **Yes** → wait for it
   to dismiss → next artist. Already-in-library rows are detected from the row
-  state and skipped (no menu, no error). When the visible rows are done it loads
-  more. Uses intelligent waits (`waitForSelector` / `waitForFunction`) over fixed
-  sleeps, never overlaps clicks, and retries transient UI failures.
+  state and skipped (no menu, no error). Uses intelligent waits
+  (`waitForSelector` / `waitForFunction`) over fixed sleeps, never overlaps
+  clicks, and retries transient UI failures.
+- **Turbo mode** (Settings, on by default) — for bulk runs. Keeps the accurate
+  fresh/already-saved detection from the row state, **widens the search across
+  all ~45 genres**, and fans each fresh artist with a single authenticated
+  request (updates included) instead of the two-step menu clicks. Target:
+  **1,000 fresh artists in ≲ 25 minutes**. Turn Turbo **off** to watch the exact
+  visual three-dot interaction instead.
 - **Location search (any city/region/country)** — type an actual place (e.g.
   “Austin, TX”, “London, UK”); it's geocoded (OpenStreetMap Nominatim) to
   coordinates and served by ReverbNation's **local charts API**

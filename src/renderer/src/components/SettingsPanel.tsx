@@ -117,6 +117,11 @@ export function SettingsPanel({
       <div className="form-grid">
         <Toggle label="Receive updates automatically" checked={a.receiveUpdates} onChange={bool('receiveUpdates')} />
         <Toggle
+          label="Turbo mode (fastest — minimal pacing)"
+          checked={a.turbo}
+          onChange={bool('turbo')}
+        />
+        <Toggle
           label="Cycle through multiple locations"
           checked={a.cycleLocations}
           onChange={bool('cycleLocations')}

@@ -42,14 +42,15 @@ describe.skipIf(!RUN)('LIVE ReverbNation end-to-end', () => {
         paths: { ...config.get().paths, browserProfilePath: PROFILE! },
         automation: {
           ...config.get().automation,
-          artistsToSave: 3,
+          artistsToSave: 30,
           receiveUpdates: true,
           headless: true,
+          turbo: true,
           maxScrollPages: 6,
           scrollSpeed: 1200,
           clickDelay: { min: 80, max: 200 },
           randomDelay: { min: 150, max: 400 },
-          maxRetries: 3,
+          maxRetries: 2,
           cycleLocations: false,
           exportReportOnFinish: true,
           reportFormat: 'csv'
@@ -110,6 +111,10 @@ describe.skipIf(!RUN)('LIVE ReverbNation end-to-end', () => {
         checks.reportExists = reports.length > 0
         checks.dbHealthy = db.ok()
         checks.logfileExists = existsSync(cfg.paths.logsPath)
+        // Throughput extrapolation.
+        checks.elapsedMs = status.elapsedMs
+        checks.msPerSave = status.saved > 0 ? Math.round(status.elapsedMs / status.saved) : null
+        checks.projected1000Min = status.saved > 0 ? Math.round((status.elapsedMs / status.saved) * 1000 / 60000) : null
 
         // eslint-disable-next-line no-console
         console.log('\n===== LIVE E2E RESULTS =====\n' + JSON.stringify(checks, null, 2) + '\n============================\n')
@@ -118,10 +123,10 @@ describe.skipIf(!RUN)('LIVE ReverbNation end-to-end', () => {
         expect(status.authStatus).toBe('authenticated')
         expect(browser.status).toBe('ready')
         expect(['completed', 'idle']).toContain(status.engineState)
-        // The exact row flow must complete the target number of fresh saves.
-        expect(status.saved).toBeGreaterThanOrEqual(3)
-        expect(db.savedCount()).toBeGreaterThanOrEqual(3)
-        expect(checks.updatesEnabledCount as number).toBeGreaterThanOrEqual(3)
+        // The exact row flow must complete a solid batch of fresh saves.
+        expect(status.saved).toBeGreaterThanOrEqual(20)
+        expect(db.savedCount()).toBeGreaterThanOrEqual(20)
+        expect(checks.updatesEnabledCount as number).toBeGreaterThanOrEqual(20)
         expect(checks.reportExists).toBe(true)
         expect(db.ok()).toBe(true)
       } finally {

@@ -119,14 +119,18 @@ export class ArtistProcessor {
       async (attempt) => {
         attempts = attempt
         const page = await this.ensureReverbPage(opts.signal)
-        const save: SaveResult =
-          opts.mode === 'row'
-            ? await this.library.addViaRowMenu(page, { id: artist.artistId, name: artist.name }, this.saveOpts(opts))
-            : await this.library.addViaProfile(
-                page,
-                { id: artist.artistId, name: artist.name, profileUrl: artist.profileUrl },
-                this.saveOpts(opts)
-              )
+        const id = artist.artistId
+        const name = artist.name
+        let save: SaveResult
+        if (opts.mode === 'profile') {
+          save = await this.library.addViaProfile(page, { id, name, profileUrl: artist.profileUrl }, this.saveOpts(opts))
+        } else if (this.settings.turbo) {
+          // Turbo: single request (row already confirmed fresh by the engine).
+          save = await this.library.addViaRequest(page, { id, name }, this.saveOpts(opts))
+        } else {
+          // Exact visual flow: three-dot menu → Add to Library → toast → Yes.
+          save = await this.library.addViaRowMenu(page, { id, name }, this.saveOpts(opts))
+        }
         // Pace between artists (human-like) after a successful action.
         if (save.outcome === 'saved') await this.human.betweenArtists(opts.signal)
         return save
@@ -152,7 +156,8 @@ export class ArtistProcessor {
     return {
       receiveUpdates: this.settings.receiveUpdates,
       onStatus: opts.onStatus,
-      signal: opts.signal
+      signal: opts.signal,
+      actionTimeoutMs: this.settings.turbo ? 8000 : 12000
     }
   }
 

@@ -111,6 +111,45 @@ export class TrendingScanner {
     return firstAfter !== null && firstAfter !== firstBefore
   }
 
+  /** Available genre values on the charts page (plain names). */
+  async genres(page: Page): Promise<string[]> {
+    return this.genreValues(page)
+  }
+
+  /** Switch the charts genre filter and wait for the row list to change. */
+  async setGenre(page: Page, genre: string, signal?: AbortSignal): Promise<void> {
+    const firstBefore = (await this.readRows(page))[0]?.artistId ?? null
+    const value = `string:${genre}`
+    await page.selectOption('select[name="genre"]', value).catch(async () => {
+      await page
+        .evaluate((v) => {
+          const g = globalThis as unknown as {
+            document: { querySelector: (s: string) => { value: string; dispatchEvent: (e: unknown) => void } | null }
+            Event: new (t: string, o: { bubbles: boolean }) => unknown
+          }
+          const sel = g.document.querySelector('select[name="genre"]')
+          if (sel) {
+            sel.value = v
+            sel.dispatchEvent(new g.Event('change', { bubbles: true }))
+          }
+        }, value)
+        .catch(() => undefined)
+    })
+    await page
+      .waitForFunction(
+        (prev) => {
+          const g = globalThis as unknown as { document: { querySelector: (s: string) => { id: string } | null } }
+          const first = g.document.querySelector('ul[id^="charts_artist_"]')
+          const id = first ? first.id.replace('charts_artist_', '') || null : null
+          return id !== null && id !== prev
+        },
+        firstBefore,
+        { timeout: 8000, polling: 250 }
+      )
+      .catch(() => undefined)
+    await sleep(300, signal).catch(() => undefined)
+  }
+
   /* --------------------- Custom location (JSON API) -------------------- */
 
   /** Discover artists for a custom (coordinate) location via the charts API. */

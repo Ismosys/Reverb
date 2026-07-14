@@ -310,27 +310,38 @@ export class AutomationEngine extends TypedEmitter<EngineEvents> {
   private async processCommunityRows(page: Page, pass: PassContext): Promise<void> {
     this.setState('scanning')
     const seen = new Set<string>()
-    let emptyRounds = 0
+    // Widen the search across every genre so the run never runs dry looking for
+    // fresh artists. '' = All Genres (the default view).
+    const genres = ['', ...(await this.deps.scanner.genres(page))]
 
-    while (!this.signal.aborted && !this.passDone(pass)) {
-      const rows = (await this.deps.scanner.readRows(page)).filter((r) => !seen.has(r.artistId))
-      if (rows.length === 0) {
-        // All visible rows processed → scroll for more.
+    for (const genre of genres) {
+      if (this.signal.aborted || this.passDone(pass)) break
+      if (genre) {
         this.setState('scanning')
-        this.setOperation('Scrolling…')
-        const more = await this.deps.scanner.nextPage(page, this.signal)
-        if (!more && ++emptyRounds >= 2) break
-        continue
+        this.setOperation(`Switching genre: ${genre}`)
+        await this.deps.scanner.setGenre(page, genre, this.signal)
       }
-      emptyRounds = 0
 
-      this.setState('processing')
-      for (const artist of rows) {
-        if (this.signal.aborted || this.passDone(pass)) break
-        await this.waitWhilePaused()
-        if (this.signal.aborted) break
-        seen.add(artist.artistId)
-        await this.processOne(artist, pass, 'row')
+      let emptyRounds = 0
+      while (!this.signal.aborted && !this.passDone(pass)) {
+        const rows = (await this.deps.scanner.readRows(page)).filter((r) => !seen.has(r.artistId))
+        if (rows.length === 0) {
+          this.setState('scanning')
+          this.setOperation('Scrolling…')
+          const more = await this.deps.scanner.nextPage(page, this.signal)
+          if (!more && ++emptyRounds >= 2) break // genre exhausted → next genre
+          continue
+        }
+        emptyRounds = 0
+
+        this.setState('processing')
+        for (const artist of rows) {
+          if (this.signal.aborted || this.passDone(pass)) break
+          await this.waitWhilePaused()
+          if (this.signal.aborted) break
+          seen.add(artist.artistId)
+          await this.processOne(artist, pass, 'row')
+        }
       }
     }
   }

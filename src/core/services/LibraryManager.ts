@@ -172,6 +172,61 @@ export class LibraryManager {
     return { outcome: 'saved', updatesEnabled }
   }
 
+  /**
+   * Turbo path: add to library + set updates in one authenticated request
+   * (`became_fan_save`), no menu clicks. Used only when Turbo mode is on; the
+   * caller has already confirmed the row is fresh (not yet in the library).
+   */
+  async addViaRequest(
+    page: Page,
+    artist: { id: string; name: string },
+    opts: SaveOptions
+  ): Promise<SaveResult> {
+    const { id, name } = artist
+    const status = opts.onStatus ?? (() => undefined)
+    this.throwIfAborted(opts.signal)
+    status('Adding to library…')
+    const receive = opts.receiveUpdates ? 1 : 0
+
+    const res = await page.evaluate(
+      async ({ id, receive }) => {
+        const g = globalThis as unknown as {
+          document: { querySelector: (s: string) => { getAttribute: (n: string) => string | null } | null }
+          fetch: (u: string, o: unknown) => Promise<{ status: number; ok: boolean; text: () => Promise<string> }>
+          URLSearchParams: new (init: Record<string, string>) => unknown
+        }
+        const token = g.document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
+        const url = `/artist/became_fan_save/artist_${id}?become_a_fan=1&receive_emails=${receive}&without_modal=true`
+        try {
+          const r = await g.fetch(url, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {
+              'X-CSRF-Token': token,
+              'X-Requested-With': 'XMLHttpRequest',
+              'Content-Type': 'application/x-www-form-urlencoded'
+            },
+            body: new g.URLSearchParams({ authenticity_token: token })
+          })
+          return { status: r.status, ok: r.ok, text: (await r.text()).slice(0, 120) }
+        } catch (e) {
+          return { status: 0, ok: false, text: String(e) }
+        }
+      },
+      { id, receive }
+    )
+
+    if (res.status === 0 || res.status >= 500) {
+      throw new RecoverableError(`Add request failed for ${name} (status ${res.status})`)
+    }
+    if (!res.ok && !/modal_close|success|already/i.test(res.text)) {
+      throw new RecoverableError(`Add not confirmed for ${name} (status ${res.status})`)
+    }
+    status('Completed')
+    this.log.info('library', `Added to library: ${name}${opts.receiveUpdates ? ' (updates on)' : ''}`, { artist: name })
+    return { outcome: 'saved', updatesEnabled: opts.receiveUpdates }
+  }
+
   /** Wait for the "<name> has been added to your Library" toast. */
   private async waitForToast(page: Page, name: string, timeout: number): Promise<boolean> {
     return page
