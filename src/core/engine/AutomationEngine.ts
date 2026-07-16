@@ -346,23 +346,38 @@ export class AutomationEngine extends TypedEmitter<EngineEvents> {
     }
   }
 
-  /** Custom locations: fan each discovered artist via their profile page. */
+  /**
+   * Custom locations: discover from the local charts API and process each artist
+   * as it is found (interleaved, so progress shows immediately). In turbo the
+   * fast request path is used; otherwise the visual profile flow. Widens across
+   * all genres to find enough artists.
+   */
   private async processCustomLocation(page: Page, pass: PassContext): Promise<void> {
-    this.setState('scanning')
-    this.setOperation(`Scanning ${pass.location?.label ?? 'location'}…`)
-    const discovered = await this.deps.scanner.scanApi(page, {
-      target: pass.passTarget,
-      location: pass.location!,
-      signal: this.signal
-    })
-    this.deps.log.info('engine', `Discovered ${discovered.length} artist(s) at ${pass.location?.label}`)
+    const location = pass.location!
+    const mode: 'row' | 'profile' = pass.settings.turbo ? 'row' : 'profile'
+    const seen = new Set<string>()
+    const genres = ['', ...(await this.deps.scanner.genres(page))]
 
-    this.setState('processing')
-    for (const artist of discovered) {
+    for (const genre of genres) {
       if (this.signal.aborted || this.passDone(pass)) break
-      await this.waitWhilePaused()
-      if (this.signal.aborted) break
-      await this.processOne(artist, pass, 'profile')
+      for (let pageNum = 1; pageNum <= 60; pageNum++) {
+        if (this.signal.aborted || this.passDone(pass)) break
+
+        this.setState('scanning')
+        this.setOperation(`Scanning ${location.label}${genre ? ` · ${genre}` : ''}…`)
+        const artists = await this.deps.scanner.fetchLocationPage(page, location, genre, pageNum)
+        if (artists.length === 0) break
+
+        this.setState('processing')
+        for (const artist of artists) {
+          if (this.signal.aborted || this.passDone(pass)) break
+          if (seen.has(artist.artistId)) continue
+          seen.add(artist.artistId)
+          await this.waitWhilePaused()
+          if (this.signal.aborted) break
+          await this.processOne(artist, pass, mode)
+        }
+      }
     }
   }
 

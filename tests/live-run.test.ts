@@ -34,15 +34,19 @@ describe.skipIf(!RUN)('LIVE ReverbNation end-to-end', () => {
       const config = ConfigManager.load(userDir)
 
       // Point at the copied logged-in profile; small, fast, headless run.
-      // Target the Global community list — exercises the exact three-dot row
-      // interaction (menu → Add to Library → toast → Receive Updates → Yes).
+      // Target a CUSTOM location (London) with turbo — exercises the interleaved
+      // local-charts-API discovery + fast request fanning (the path that was stuck).
       config.save({
         ...config.get(),
-        activeLocationId: 'global',
+        locations: [
+          ...config.get().locations,
+          { id: 'london', label: 'Greater London, England, UK', type: 'custom', latitude: 51.5074, longitude: -0.1278, query: 'London, UK' }
+        ],
+        activeLocationId: 'london',
         paths: { ...config.get().paths, browserProfilePath: PROFILE! },
         automation: {
           ...config.get().automation,
-          artistsToSave: 30,
+          artistsToSave: 20,
           receiveUpdates: true,
           headless: true,
           turbo: true,
@@ -123,10 +127,10 @@ describe.skipIf(!RUN)('LIVE ReverbNation end-to-end', () => {
         expect(status.authStatus).toBe('authenticated')
         expect(browser.status).toBe('ready')
         expect(['completed', 'idle']).toContain(status.engineState)
-        // The exact row flow must complete a solid batch of fresh saves.
-        expect(status.saved).toBeGreaterThanOrEqual(20)
-        expect(db.savedCount()).toBeGreaterThanOrEqual(20)
-        expect(checks.updatesEnabledCount as number).toBeGreaterThanOrEqual(20)
+        // Custom location must discover + fan a solid batch (progress, not stuck).
+        expect(status.saved).toBeGreaterThanOrEqual(15)
+        expect(db.savedCount()).toBeGreaterThanOrEqual(15)
+        expect(checks.updatesEnabledCount as number).toBeGreaterThanOrEqual(15)
         expect(checks.reportExists).toBe(true)
         expect(db.ok()).toBe(true)
       } finally {

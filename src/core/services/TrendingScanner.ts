@@ -30,8 +30,6 @@ interface ChartResult {
  *   coordinates (there is no on-page list for arbitrary places).
  */
 export class TrendingScanner {
-  private static readonly MAX_PAGES_PER_GENRE = 60
-
   constructor(
     private readonly site: SiteSelectors,
     private readonly _human: HumanBehavior,
@@ -152,31 +150,8 @@ export class TrendingScanner {
 
   /* --------------------- Custom location (JSON API) -------------------- */
 
-  /** Discover artists for a custom (coordinate) location via the charts API. */
-  async scanApi(
-    page: Page,
-    opts: { target: number; location: TrendingLocation; signal?: AbortSignal }
-  ): Promise<DiscoveredArtist[]> {
-    const found = new Map<string, DiscoveredArtist>()
-    const genres = ['', ...(await this.genreValues(page))]
-    this.log.info('scan', `Local charts API scan for ${opts.location.label} (target ${opts.target})`)
-
-    for (const genre of genres) {
-      if (found.size >= opts.target || opts.signal?.aborted) break
-      for (let pageNum = 1; pageNum <= TrendingScanner.MAX_PAGES_PER_GENRE; pageNum++) {
-        if (found.size >= opts.target || opts.signal?.aborted) break
-        const artists = await this.fetchApiPage(page, opts.location, genre, pageNum)
-        if (artists.length === 0) break
-        let added = 0
-        for (const a of artists) if (!found.has(a.artistId)) (found.set(a.artistId, a), added++)
-        if (added === 0 && pageNum > 1) break
-        await sleep(150, opts.signal)
-      }
-    }
-    return Array.from(found.values()).slice(0, opts.target)
-  }
-
-  private async fetchApiPage(
+  /** Fetch one page of the local charts API for a custom (coordinate) location. */
+  async fetchLocationPage(
     page: Page,
     location: TrendingLocation,
     genre: string,
@@ -205,13 +180,15 @@ export class TrendingScanner {
       .catch(() => [] as unknown[])
 
     const base = this.site.baseUrl
-    return (results as ChartResult[])
+    const artists = (results as ChartResult[])
       .filter((r) => r && typeof r.id === 'number')
       .map((r) => ({
         artistId: String(r.id),
         name: r.name && r.name.trim().length > 1 ? r.name.trim() : `Artist ${r.id}`,
         profileUrl: r.homepage ? `${base}/${r.homepage}` : `${base}/artist/${r.id}`
       }))
+    this.log.debug('scan', `Local charts ${location.label} genre="${genre || 'all'}" p${pageNum}: ${artists.length} artist(s)`)
+    return artists
   }
 
   private async genreValues(page: Page): Promise<string[]> {
