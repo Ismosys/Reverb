@@ -9,6 +9,7 @@ import {
   type HealthSnapshot,
   type IpcResult,
   type LogEntry,
+  type ProfileInfo,
   type ReportFormat,
   type RunStatus,
   type TrendingLocation
@@ -39,6 +40,14 @@ const api = {
   auth: {
     login: (): Promise<IpcResult<AuthStatus>> => ipcRenderer.invoke(IpcChannels.authLogin),
     check: (): Promise<IpcResult<AuthStatus>> => ipcRenderer.invoke(IpcChannels.authCheck)
+  },
+  profiles: {
+    list: (): Promise<IpcResult<ProfileInfo[]>> => ipcRenderer.invoke(IpcChannels.profilesList),
+    add: (name: string): Promise<IpcResult<AppConfig>> => ipcRenderer.invoke(IpcChannels.profileAdd, name),
+    rename: (id: string, name: string): Promise<IpcResult<AppConfig>> =>
+      ipcRenderer.invoke(IpcChannels.profileRename, id, name),
+    remove: (id: string): Promise<IpcResult<ProfileInfo[]>> => ipcRenderer.invoke(IpcChannels.profileRemove, id),
+    setActive: (id: string): Promise<IpcResult<ProfileInfo[]>> => ipcRenderer.invoke(IpcChannels.profileSetActive, id)
   },
   engine: {
     start: (): Promise<IpcResult<RunStatus>> => ipcRenderer.invoke(IpcChannels.engineStart),

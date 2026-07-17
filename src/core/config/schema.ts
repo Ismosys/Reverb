@@ -53,11 +53,19 @@ export const siteSchema = z.object({
   loggedOutIndicator: z.string()
 })
 
+export const profileSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  createdAt: z.string()
+})
+
 export const appConfigSchema = z.object({
   automation: automationSchema,
   activeLocationId: z.string().nullable(),
   locations: z.array(locationSchema),
   cycleLocationIds: z.array(z.string()),
+  profiles: z.array(profileSchema).min(1),
+  activeProfileId: z.string().min(1),
   paths: pathsSchema,
   site: siteSchema
 })

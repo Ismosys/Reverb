@@ -1,21 +1,53 @@
 import { join } from 'node:path'
 import { app, BrowserWindow, nativeImage, shell } from 'electron'
 import { AppContainer } from '@core/AppContainer'
-import { registerIpc } from './ipc'
+import { bindEvents, registerIpc } from './ipc'
 // Bundled by electron-vite; resolves to a real path in dev and packaged builds.
 import appIconPath from '../../build/icon.png?asset'
 
 const appIcon = nativeImage.createFromPath(appIconPath)
 
 /**
- * Electron main entrypoint. Owns the window lifecycle, constructs the single
- * AppContainer, wires IPC, and guarantees graceful teardown of the browser,
- * database and logger on quit.
+ * Electron main entrypoint. Owns the window lifecycle and the app container.
+ *
+ * The container is rebuilt when the active account profile switches (each
+ * profile has isolated browser session + data). IPC handlers reference the
+ * current container via an accessor, and event forwarders are re-bound on each
+ * rebuild, so switching accounts is transparent to the renderer.
  */
 
 let mainWindow: BrowserWindow | null = null
 let container: AppContainer | null = null
+let unbindEvents: (() => void) | null = null
 let disposeIpc: (() => void) | null = null
+let userDataDir = ''
+
+/** Swap to a different account profile: stop, tear down, rebuild, re-bind. */
+async function activateProfile(profileId: string): Promise<void> {
+  if (!container) return
+  const old = container
+  try {
+    old.engine.stop()
+  } catch {
+    /* ignore */
+  }
+  old.config.setActiveProfile(profileId)
+
+  // Build the new container (reads the updated active profile from config).
+  const next = new AppContainer(userDataDir)
+  container = next
+  unbindEvents?.()
+  unbindEvents = bindEvents(next, () => mainWindow)
+
+  await old.dispose().catch(() => undefined)
+
+  // Push a fresh snapshot for the newly-active account.
+  const win = mainWindow
+  if (win && !win.isDestroyed()) {
+    win.webContents.send('evt:status', next.engine.getStatus())
+    win.webContents.send('evt:health', next.health.sample())
+  }
+}
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -57,8 +89,17 @@ app.whenReady().then(() => {
   if (process.platform === 'darwin' && app.dock && !appIcon.isEmpty()) {
     app.dock.setIcon(appIcon)
   }
-  container = new AppContainer(app.getPath('userData'))
-  disposeIpc = registerIpc(container, () => mainWindow)
+  userDataDir = app.getPath('userData')
+  container = new AppContainer(userDataDir)
+  unbindEvents = bindEvents(container, () => mainWindow)
+  disposeIpc = registerIpc({
+    getContainer: () => {
+      if (!container) throw new Error('App not initialized')
+      return container
+    },
+    getWindow: () => mainWindow,
+    activateProfile
+  })
 
   createWindow()
 
@@ -75,6 +116,7 @@ app.on('before-quit', async (event) => {
   if (!container) return
   event.preventDefault()
   disposeIpc?.()
+  unbindEvents?.()
   const c = container
   container = null
   await c.dispose().catch(() => undefined)

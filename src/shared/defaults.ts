@@ -44,6 +44,9 @@ export const DEFAULT_LOCATIONS: TrendingLocation[] = [
   { id: 'global', label: 'Global', type: 'global', favorite: true }
 ]
 
+/** The initial account profile created for a fresh install. */
+export const DEFAULT_PROFILE_ID = 'default'
+
 /** Build a complete default config given resolved paths. */
 export function buildDefaultConfig(paths: AppConfig['paths']): AppConfig {
   return {
@@ -51,6 +54,8 @@ export function buildDefaultConfig(paths: AppConfig['paths']): AppConfig {
     activeLocationId: 'global',
     locations: DEFAULT_LOCATIONS.map((l) => ({ ...l })),
     cycleLocationIds: [],
+    profiles: [{ id: DEFAULT_PROFILE_ID, name: 'Account 1', createdAt: '' }],
+    activeProfileId: DEFAULT_PROFILE_ID,
     paths,
     site: { ...DEFAULT_SITE }
   }

@@ -37,6 +37,23 @@ export interface GeocodeResult {
   longitude: number
 }
 
+/**
+ * A ReverbNation account "profile". Each has its own isolated browser session
+ * (so multiple accounts stay logged in) and its own saved-artist database.
+ */
+export interface Profile {
+  id: string
+  name: string
+  createdAt: string
+}
+
+/** Profile plus runtime info for the account switcher. */
+export interface ProfileInfo extends Profile {
+  active: boolean
+  /** Whether this profile has a saved browser session (cookies present). */
+  hasSession: boolean
+}
+
 /** Delay range in milliseconds used to randomise pacing. */
 export interface DelayRange {
   min: number
@@ -98,6 +115,11 @@ export interface AppConfig {
   locations: TrendingLocation[]
   /** Ordered location ids to visit when `automation.cycleLocations` is on. */
   cycleLocationIds: string[]
+  /** ReverbNation account profiles (multi-account support). */
+  profiles: Profile[]
+  /** The currently-active account profile. */
+  activeProfileId: string
+  /** Paths for the ACTIVE profile (recomputed on switch). */
   paths: PathsConfig
   /** CSS selectors + URLs for the ReverbNation site (kept configurable so the
    *  app survives site markup changes without a code deploy). */
@@ -261,6 +283,11 @@ export const IpcChannels = {
   locationToggleFavorite: 'location:toggleFavorite',
   locationSetCycle: 'location:setCycle',
   locationAddByName: 'location:addByName',
+  profilesList: 'profiles:list',
+  profileAdd: 'profile:add',
+  profileRemove: 'profile:remove',
+  profileRename: 'profile:rename',
+  profileSetActive: 'profile:setActive',
   authLogin: 'auth:login',
   authCheck: 'auth:check',
   engineStart: 'engine:start',

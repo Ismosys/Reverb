@@ -1,17 +1,19 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { api, unwrap } from './api'
-import { useConfig, useEngineStatus, useHealth, useLogs } from './hooks'
+import { useConfig, useEngineStatus, useHealth, useLogs, useProfiles } from './hooks'
 import { Dashboard } from './components/Dashboard'
 import { LocationsPanel } from './components/LocationsPanel'
 import { SettingsPanel } from './components/SettingsPanel'
 import { DatabasePanel } from './components/DatabasePanel'
 import { LogsPanel } from './components/LogsPanel'
+import { ProfilesPanel } from './components/ProfilesPanel'
 import { Dot } from './components/common'
 
-type Tab = 'dashboard' | 'locations' | 'settings' | 'database' | 'logs'
+type Tab = 'dashboard' | 'accounts' | 'locations' | 'settings' | 'database' | 'logs'
 
 const TABS: Array<{ id: Tab; label: string }> = [
   { id: 'dashboard', label: 'Dashboard' },
+  { id: 'accounts', label: 'Accounts' },
   { id: 'locations', label: 'Locations' },
   { id: 'settings', label: 'Settings' },
   { id: 'database', label: 'Database' },
@@ -25,7 +27,15 @@ export function App(): React.JSX.Element {
   const status = useEngineStatus()
   const health = useHealth()
   const logs = useLogs()
-  const { config, setConfig } = useConfig()
+  const { config, setConfig, reload: reloadConfig } = useConfig()
+  const { profiles, reload: reloadProfiles } = useProfiles()
+  const activeProfile = profiles.find((p) => p.active)
+
+  // After switching accounts, refresh config + profiles for the new session.
+  const onSwitched = useCallback(() => {
+    reloadConfig().catch(() => undefined)
+    reloadProfiles().catch(() => undefined)
+  }, [reloadConfig, reloadProfiles])
 
   const notify = useCallback((msg: string, err = false) => {
     setToast({ msg, err })
@@ -74,6 +84,24 @@ export function App(): React.JSX.Element {
         <div className="brand">
           <span className="logo" />
           Reverb
+        </div>
+        {/* Active account switcher */}
+        <div
+          className="nav-item"
+          onClick={() => setTab('accounts')}
+          style={{ marginBottom: 8, borderColor: 'var(--border)', background: 'var(--bg-elev)' }}
+          title="Manage accounts"
+        >
+          <Dot state={status?.authStatus === 'authenticated' ? 'ok' : 'warn'} />
+          <div style={{ overflow: 'hidden' }}>
+            <div style={{ fontSize: 11, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+              Account
+            </div>
+            <div style={{ fontWeight: 700, whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
+              {activeProfile?.name ?? '—'}
+            </div>
+          </div>
+          <span style={{ marginLeft: 'auto', color: 'var(--text-dim)' }}>⌄</span>
         </div>
         {TABS.map((t) => (
           <div key={t.id} className={`nav-item ${tab === t.id ? 'active' : ''}`} onClick={() => setTab(t.id)}>
@@ -135,6 +163,9 @@ export function App(): React.JSX.Element {
         </div>
 
         {tab === 'dashboard' && <Dashboard status={status} health={health} />}
+        {tab === 'accounts' && (
+          <ProfilesPanel profiles={profiles} reload={reloadProfiles} onSwitched={onSwitched} notify={notify} />
+        )}
         {tab === 'locations' && config && <LocationsPanel config={config} onChange={setConfig} notify={notify} />}
         {tab === 'settings' && config && <SettingsPanel config={config} onChange={setConfig} notify={notify} />}
         {tab === 'database' && <DatabasePanel notify={notify} />}

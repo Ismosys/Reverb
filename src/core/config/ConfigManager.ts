@@ -1,7 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { buildDefaultConfig } from '@shared/defaults'
-import type { AppConfig, AutomationSettings, TrendingLocation } from '@shared/types'
+import { buildDefaultConfig, DEFAULT_PROFILE_ID } from '@shared/defaults'
+import type { AppConfig, AutomationSettings, PathsConfig, Profile, ProfileInfo, TrendingLocation } from '@shared/types'
 import { ConfigError } from '../utils/errors'
 import { TypedEmitter } from '../utils/events'
 import { appConfigSchema } from './schema'
@@ -18,41 +18,81 @@ type ConfigEvents = { changed: AppConfig }
 export class ConfigManager extends TypedEmitter<ConfigEvents> {
   private config: AppConfig
   private readonly configFilePath: string
+  private readonly userDataDir: string
 
-  private constructor(configFilePath: string, config: AppConfig) {
+  private constructor(configFilePath: string, userDataDir: string, config: AppConfig) {
     super()
     this.configFilePath = configFilePath
+    this.userDataDir = userDataDir
     this.config = config
   }
 
+  /** Resolve the on-disk paths for a given profile id. */
+  static resolvePaths(userDataDir: string, profileId: string): PathsConfig {
+    const dir = join(userDataDir, 'profiles', profileId)
+    return {
+      databasePath: join(dir, 'data', 'reverb.db'),
+      browserProfilePath: join(dir, 'browser-profile'),
+      reportsPath: join(dir, 'reports'),
+      // Logs are shared across profiles.
+      logsPath: join(userDataDir, 'logs', 'reverb.log')
+    }
+  }
+
   /**
-   * Build a ConfigManager rooted at `userDataDir`. Resolves default paths,
-   * loads any existing config file and validates the merged result.
+   * One-time migration of legacy single-profile data (browser-profile, data,
+   * reports directly under userData) into the default profile's directory, so
+   * upgrading users keep their existing login and history.
+   */
+  private static migrateLegacy(userDataDir: string, profileId: string): void {
+    const dir = join(userDataDir, 'profiles', profileId)
+    try {
+      mkdirSync(dir, { recursive: true })
+      for (const name of ['browser-profile', 'data', 'reports']) {
+        const src = join(userDataDir, name)
+        const dst = join(dir, name)
+        if (existsSync(src) && !existsSync(dst)) renameSync(src, dst)
+      }
+    } catch {
+      // Migration is best-effort; a fresh profile dir works regardless.
+    }
+  }
+
+  /**
+   * Build a ConfigManager rooted at `userDataDir`, using the active profile's
+   * paths. Migrates legacy data on first upgrade and validates the result.
    */
   static load(userDataDir: string): ConfigManager {
     const configFilePath = join(userDataDir, 'config.json')
-    const defaults = buildDefaultConfig({
-      databasePath: join(userDataDir, 'data', 'reverb.db'),
-      browserProfilePath: join(userDataDir, 'browser-profile'),
-      reportsPath: join(userDataDir, 'reports'),
-      logsPath: join(userDataDir, 'logs', 'reverb.log')
-    })
 
-    let merged: AppConfig = defaults
+    let raw: Partial<AppConfig> = {}
     if (existsSync(configFilePath)) {
       try {
-        const raw = JSON.parse(readFileSync(configFilePath, 'utf-8')) as Partial<AppConfig>
-        merged = ConfigManager.mergeDeep(defaults, raw)
-      } catch (err) {
-        // Corrupt file: fall back to defaults rather than blocking startup.
-        merged = defaults
-        void err
+        raw = JSON.parse(readFileSync(configFilePath, 'utf-8')) as Partial<AppConfig>
+      } catch {
+        raw = {}
       }
     }
 
+    // Determine profiles + active profile (with legacy migration on first run).
+    const hadProfiles = Array.isArray(raw.profiles) && raw.profiles.length > 0
+    const profiles: Profile[] = hadProfiles
+      ? (raw.profiles as Profile[]).map((p) => ({ ...p, createdAt: p.createdAt || new Date().toISOString() }))
+      : [{ id: DEFAULT_PROFILE_ID, name: 'Account 1', createdAt: new Date().toISOString() }]
+    let activeProfileId = raw.activeProfileId && profiles.some((p) => p.id === raw.activeProfileId)
+      ? raw.activeProfileId
+      : profiles[0].id
+    if (!hadProfiles) ConfigManager.migrateLegacy(userDataDir, activeProfileId)
+
+    const paths = ConfigManager.resolvePaths(userDataDir, activeProfileId)
+    const defaults = buildDefaultConfig(paths)
+    let merged = ConfigManager.mergeDeep(defaults, raw)
+    // Profiles/active/paths are authoritative here, not from the raw merge.
+    merged = { ...merged, profiles, activeProfileId, paths }
+
     const parsed = appConfigSchema.safeParse(merged)
-    const config = parsed.success ? (parsed.data as AppConfig) : defaults
-    const mgr = new ConfigManager(configFilePath, config)
+    const config = parsed.success ? (parsed.data as AppConfig) : { ...defaults, profiles, activeProfileId, paths }
+    const mgr = new ConfigManager(configFilePath, userDataDir, config)
     mgr.persist()
     return mgr
   }
@@ -167,10 +207,82 @@ export class ConfigManager extends TypedEmitter<ConfigEvents> {
     return [...this.config.locations]
   }
 
-  /** Reset everything to defaults (keeps resolved paths). */
+  /* --------------------------- Profiles ---------------------------- */
+
+  listProfiles(): Profile[] {
+    return this.config.profiles
+  }
+
+  getActiveProfile(): Profile {
+    return this.config.profiles.find((p) => p.id === this.config.activeProfileId) ?? this.config.profiles[0]
+  }
+
+  /** Profiles enriched with active flag and whether a session is saved. */
+  profilesInfo(): ProfileInfo[] {
+    return this.config.profiles.map((p) => ({
+      ...p,
+      active: p.id === this.config.activeProfileId,
+      hasSession: this.profileHasSession(p.id)
+    }))
+  }
+
+  /** True if the profile has a persisted browser session (cookies present). */
+  profileHasSession(id: string): boolean {
+    const dir = join(this.userDataDir, 'profiles', id, 'browser-profile')
+    return existsSync(join(dir, 'Default', 'Cookies')) || existsSync(join(dir, 'Cookies'))
+  }
+
+  /** Create a new (empty) account profile. Does not switch to it. */
+  addProfile(name: string): AppConfig {
+    const label = name.trim() || `Account ${this.config.profiles.length + 1}`
+    const base = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 24) || 'account'
+    let id = `p-${base}`
+    let n = 2
+    while (this.config.profiles.some((p) => p.id === id)) id = `p-${base}-${n++}`
+    const profile: Profile = { id, name: label, createdAt: new Date().toISOString() }
+    return this.save({ ...this.config, profiles: [...this.config.profiles, profile] })
+  }
+
+  renameProfile(id: string, name: string): AppConfig {
+    const profiles = this.config.profiles.map((p) => (p.id === id ? { ...p, name: name.trim() || p.name } : p))
+    return this.save({ ...this.config, profiles })
+  }
+
+  /** Remove a profile and delete its data directory. Cannot remove the last. */
+  removeProfile(id: string): AppConfig {
+    if (this.config.profiles.length <= 1) throw new ConfigError('At least one account is required')
+    const profiles = this.config.profiles.filter((p) => p.id !== id)
+    let activeProfileId = this.config.activeProfileId
+    let paths = this.config.paths
+    if (activeProfileId === id) {
+      activeProfileId = profiles[0].id
+      paths = ConfigManager.resolvePaths(this.userDataDir, activeProfileId)
+    }
+    const next = this.save({ ...this.config, profiles, activeProfileId, paths })
+    try {
+      rmSync(join(this.userDataDir, 'profiles', id), { recursive: true, force: true })
+    } catch {
+      // Non-fatal: the config no longer references it.
+    }
+    return next
+  }
+
+  /** Switch the active profile and recompute its paths. */
+  setActiveProfile(id: string): AppConfig {
+    if (!this.config.profiles.some((p) => p.id === id)) throw new ConfigError(`Unknown profile: ${id}`)
+    const paths = ConfigManager.resolvePaths(this.userDataDir, id)
+    return this.save({ ...this.config, activeProfileId: id, paths })
+  }
+
+  /** Reset settings to defaults (keeps profiles + active profile + paths). */
   reset(): AppConfig {
     const fresh = buildDefaultConfig(this.config.paths)
-    return this.save(fresh)
+    return this.save({
+      ...fresh,
+      profiles: this.config.profiles,
+      activeProfileId: this.config.activeProfileId,
+      paths: this.config.paths
+    })
   }
 
   private persist(): void {

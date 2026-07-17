@@ -33,6 +33,11 @@ a persistent SQLite database.
 
 ## Features
 
+- **Multiple accounts (Telegram-style)** — add several ReverbNation accounts,
+  each with its **own isolated browser session** (so they all stay logged in)
+  and its **own saved-artist history**. Switch the active account from the
+  **Accounts** tab or the sidebar; the automation always runs on the active one.
+  Upgrading users' existing login is migrated automatically into "Account 1".
 - **Persistent authentication** — log in once in a real browser window; the
   Playwright persistent profile keeps the session across restarts. Expired
   sessions are detected and you're prompted to re-authenticate only when needed.

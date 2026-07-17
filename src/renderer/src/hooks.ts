@@ -1,6 +1,18 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { AppConfig, HealthSnapshot, LogEntry, RunStatus } from '@shared/types'
+import type { AppConfig, HealthSnapshot, LogEntry, ProfileInfo, RunStatus } from '@shared/types'
 import { api, unwrap } from './api'
+
+/** Account profiles with a reload helper. */
+export function useProfiles(): { profiles: ProfileInfo[]; reload: () => Promise<void> } {
+  const [profiles, setProfiles] = useState<ProfileInfo[]>([])
+  const reload = useCallback(async () => {
+    setProfiles(await unwrap(api.profiles.list()))
+  }, [])
+  useEffect(() => {
+    reload().catch(() => undefined)
+  }, [reload])
+  return { profiles, reload }
+}
 
 /** Live engine status: seeds from a call then subscribes to pushes. */
 export function useEngineStatus(): RunStatus | null {
