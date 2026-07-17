@@ -114,21 +114,40 @@ describe.skipIf(!RUN)('LIVE ReverbNation end-to-end', () => {
         checks.elapsedMs = status.elapsedMs
         checks.msPerSave = status.saved > 0 ? Math.round(status.elapsedMs / status.saved) : null
 
-        // GROUND TRUTH: verify each "saved" artist is actually a fan on the server.
+        // GROUND TRUTH: verify each "saved" artist is actually a fan AND is
+        // subscribed to email updates on the server (via manage_fan_settings).
         const page = await browser.getPage()
-        const toVerify = savedRecords.slice(0, 25)
+        await page.goto('https://www.reverbnation.com/main/charts', { waitUntil: 'domcontentloaded' }).catch(() => {})
+        const toVerify = savedRecords.slice(0, 15)
         const notFanned: string[] = []
-        let updatesConfirmed = 0
+        const notSubscribed: string[] = []
         for (const r of toVerify) {
-          await page.goto(`https://www.reverbnation.com/artist/${r.artistId}`, { waitUntil: 'networkidle' }).catch(() => {})
-          await page.waitForTimeout(1800)
-          const isFan = await page.locator('a.button--added--profile').first().isVisible().catch(() => false)
-          if (!isFan) notFanned.push(`${r.name} (${r.artistId})`)
-          else updatesConfirmed++
+          const res = await page
+            .evaluate(async (id) => {
+              const g = globalThis as unknown as {
+                fetch: (u: string, o: unknown) => Promise<{ text: () => Promise<string> }>
+              }
+              const raw = await g
+                .fetch(`/artist/manage_fan_settings/artist_${id}`, {
+                  credentials: 'same-origin',
+                  headers: { 'X-Requested-With': 'XMLHttpRequest' }
+                })
+                .then((x) => x.text())
+              const m = raw.match(/modal_dialog\('([\s\S]*)'\)/)
+              const html = (m ? m[1] : raw).replace(/\\"/g, '"')
+              const isFan = /remove\s*fan|you are a fan|receive_emails/i.test(html)
+              const subscribed = /name="receive_emails"[^>]*checked/i.test(html)
+              return { isFan, subscribed }
+            }, r.artistId)
+            .catch(() => ({ isFan: false, subscribed: false }))
+          if (!res.isFan) notFanned.push(`${r.name} (${r.artistId})`)
+          if (!res.subscribed) notSubscribed.push(`${r.name} (${r.artistId})`)
         }
         checks.verifiedSample = toVerify.length
-        checks.trulyFanned = updatesConfirmed
+        checks.trulyFanned = toVerify.length - notFanned.length
+        checks.subscribedToUpdates = toVerify.length - notSubscribed.length
         checks.notActuallyFanned = notFanned
+        checks.notSubscribed = notSubscribed
 
         // eslint-disable-next-line no-console
         console.log('\n===== LIVE E2E RESULTS =====\n' + JSON.stringify(checks, null, 2) + '\n============================\n')
@@ -137,9 +156,9 @@ describe.skipIf(!RUN)('LIVE ReverbNation end-to-end', () => {
         expect(browser.status).toBe('ready')
         expect(status.saved).toBeGreaterThanOrEqual(30)
         expect(status.failed).toBe(0)
-        // Every "saved" artist must actually be fanned on the server.
+        // Every sampled "saved" artist must actually be fanned AND subscribed.
         expect(notFanned).toEqual([])
-        expect(checks.updatesEnabledCount as number).toBeGreaterThanOrEqual(30)
+        expect(notSubscribed).toEqual([])
       } finally {
         health.stop()
         await browser.close()

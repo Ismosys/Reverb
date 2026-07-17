@@ -199,13 +199,15 @@ export class LibraryManager {
       throw new RecoverableError(`Save not confirmed for ${name} (status ${fan.status}: ${fan.text.slice(0, 40)})`)
     }
 
-    // Step 2 — Receive updates? Yes (best-effort; the save already succeeded).
+    // Step 2 — Receive updates? Yes. The `modal=manage_fan_settings` param is
+    // REQUIRED: without it the server accepts the request but ignores
+    // receive_emails (no email subscription). This matches the real "Yes" click.
     let updatesEnabled = false
     if (opts.receiveUpdates) {
       status('Accepting updates…')
       const upd = await this.postFan(
         page,
-        `/artist/became_fan_save/artist_${id}?become_a_fan=1&receive_emails=1&without_modal=true`
+        `/artist/became_fan_save/artist_${id}?become_a_fan=1&modal=manage_fan_settings&receive_emails=1&without_modal=true`
       )
       updatesEnabled = upd.ok || /modal_close|success/i.test(upd.text)
       if (!updatesEnabled) this.log.warn('library', `Updates not confirmed for ${name}`, { artist: name })
