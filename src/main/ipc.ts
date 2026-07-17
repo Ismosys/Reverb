@@ -123,7 +123,9 @@ export function registerIpc({ getContainer, getWindow, activateProfile }: IpcDep
     wrap(async () => {
       const cfg = c().config.get()
       await c().browser.launch({ profilePath: cfg.paths.browserProfilePath, headless: false })
-      return c().auth.openLoginWindow()
+      const status = await c().auth.openLoginWindow()
+      c().engine.setAuthStatus(status)
+      return status
     })
   )
   ipcMain.handle(
@@ -131,9 +133,12 @@ export function registerIpc({ getContainer, getWindow, activateProfile }: IpcDep
     wrap(async () => {
       const cfg = c().config.get()
       if (!c().browser.isReady()) {
-        await c().browser.launch({ profilePath: cfg.paths.browserProfilePath, headless: cfg.automation.headless })
+        // Startup/switch verification is invisible (headless); Login is headed.
+        await c().browser.launch({ profilePath: cfg.paths.browserProfilePath, headless: true })
       }
-      return c().auth.checkAuthenticated()
+      const status = await c().auth.checkAuthenticated()
+      c().engine.setAuthStatus(status)
+      return status
     })
   )
 

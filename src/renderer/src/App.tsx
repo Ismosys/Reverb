@@ -31,11 +31,19 @@ export function App(): React.JSX.Element {
   const { profiles, reload: reloadProfiles } = useProfiles()
   const activeProfile = profiles.find((p) => p.active)
 
-  // After switching accounts, refresh config + profiles for the new session.
+  // After switching accounts, refresh config + profiles and re-verify the new
+  // account's saved session so the dashboard reflects it immediately.
   const onSwitched = useCallback(() => {
     reloadConfig().catch(() => undefined)
     reloadProfiles().catch(() => undefined)
+    api.auth.check().catch(() => undefined)
   }, [reloadConfig, reloadProfiles])
+
+  // On launch, verify the active account's persisted session (invisible check),
+  // so a still-logged-in account shows "authenticated" without any action.
+  useEffect(() => {
+    api.auth.check().catch(() => undefined)
+  }, [])
 
   const notify = useCallback((msg: string, err = false) => {
     setToast({ msg, err })

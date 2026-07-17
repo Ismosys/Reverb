@@ -119,6 +119,12 @@ export class AutomationEngine extends TypedEmitter<EngineEvents> {
     }
   }
 
+  /** Update the reported auth status (e.g. after a startup/switch auth check). */
+  setAuthStatus(status: AuthStatus): void {
+    this.authStatus = status
+    this.push()
+  }
+
   private setState(state: EngineState): void {
     this.state = state
     this.deps.health.setEngineState(state)
