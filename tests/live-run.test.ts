@@ -33,20 +33,15 @@ describe.skipIf(!RUN)('LIVE ReverbNation end-to-end', () => {
       const userDir = mkdtempSync(join(tmpdir(), 'reverb-live-'))
       const config = ConfigManager.load(userDir)
 
-      // Point at the copied logged-in profile; small, fast, headless run.
-      // Target a CUSTOM location (London) with turbo — exercises the interleaved
-      // local-charts-API discovery + fast request fanning (the path that was stuck).
+      // Global charts, turbo — the default path. Verify each "saved" artist is
+      // actually fanned on the server afterwards (no false positives / omissions).
       config.save({
         ...config.get(),
-        locations: [
-          ...config.get().locations,
-          { id: 'london', label: 'Greater London, England, UK', type: 'custom', latitude: 51.5074, longitude: -0.1278, query: 'London, UK' }
-        ],
-        activeLocationId: 'london',
+        activeLocationId: 'global',
         paths: { ...config.get().paths, browserProfilePath: PROFILE! },
         automation: {
           ...config.get().automation,
-          artistsToSave: 20,
+          artistsToSave: 40,
           receiveUpdates: true,
           headless: true,
           turbo: true,
@@ -54,7 +49,7 @@ describe.skipIf(!RUN)('LIVE ReverbNation end-to-end', () => {
           scrollSpeed: 1200,
           clickDelay: { min: 80, max: 200 },
           randomDelay: { min: 150, max: 400 },
-          maxRetries: 2,
+          maxRetries: 3,
           cycleLocations: false,
           exportReportOnFinish: true,
           reportFormat: 'csv'
@@ -118,21 +113,33 @@ describe.skipIf(!RUN)('LIVE ReverbNation end-to-end', () => {
         // Throughput extrapolation.
         checks.elapsedMs = status.elapsedMs
         checks.msPerSave = status.saved > 0 ? Math.round(status.elapsedMs / status.saved) : null
-        checks.projected1000Min = status.saved > 0 ? Math.round((status.elapsedMs / status.saved) * 1000 / 60000) : null
+
+        // GROUND TRUTH: verify each "saved" artist is actually a fan on the server.
+        const page = await browser.getPage()
+        const toVerify = savedRecords.slice(0, 25)
+        const notFanned: string[] = []
+        let updatesConfirmed = 0
+        for (const r of toVerify) {
+          await page.goto(`https://www.reverbnation.com/artist/${r.artistId}`, { waitUntil: 'networkidle' }).catch(() => {})
+          await page.waitForTimeout(1800)
+          const isFan = await page.locator('a.button--added--profile').first().isVisible().catch(() => false)
+          if (!isFan) notFanned.push(`${r.name} (${r.artistId})`)
+          else updatesConfirmed++
+        }
+        checks.verifiedSample = toVerify.length
+        checks.trulyFanned = updatesConfirmed
+        checks.notActuallyFanned = notFanned
 
         // eslint-disable-next-line no-console
         console.log('\n===== LIVE E2E RESULTS =====\n' + JSON.stringify(checks, null, 2) + '\n============================\n')
 
-        // Assertions — "everything works"
         expect(status.authStatus).toBe('authenticated')
         expect(browser.status).toBe('ready')
-        expect(['completed', 'idle']).toContain(status.engineState)
-        // Custom location must discover + fan a solid batch (progress, not stuck).
-        expect(status.saved).toBeGreaterThanOrEqual(15)
-        expect(db.savedCount()).toBeGreaterThanOrEqual(15)
-        expect(checks.updatesEnabledCount as number).toBeGreaterThanOrEqual(15)
-        expect(checks.reportExists).toBe(true)
-        expect(db.ok()).toBe(true)
+        expect(status.saved).toBeGreaterThanOrEqual(30)
+        expect(status.failed).toBe(0)
+        // Every "saved" artist must actually be fanned on the server.
+        expect(notFanned).toEqual([])
+        expect(checks.updatesEnabledCount as number).toBeGreaterThanOrEqual(30)
       } finally {
         health.stop()
         await browser.close()

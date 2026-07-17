@@ -173,9 +173,11 @@ export class LibraryManager {
   }
 
   /**
-   * Turbo path: add to library + set updates in one authenticated request
-   * (`became_fan_save`), no menu clicks. Used only when Turbo mode is on; the
-   * caller has already confirmed the row is fresh (not yet in the library).
+   * Turbo path: the same two server actions the menu performs, without the UI —
+   *   1. `become_fan`      → adds the artist to the library (the real "Save").
+   *   2. `became_fan_save` → sets receive-updates (the "Yes" answer).
+   * Both are authenticated POSTs from the current page (CSRF token from <meta>).
+   * Step 1 is verified via its response signal; a failure is retryable.
    */
   async addViaRequest(
     page: Page,
@@ -185,46 +187,60 @@ export class LibraryManager {
     const { id, name } = artist
     const status = opts.onStatus ?? (() => undefined)
     this.throwIfAborted(opts.signal)
+
+    // Step 1 — Add to Library (become a fan). THIS is the actual save.
     status('Adding to library…')
-    const receive = opts.receiveUpdates ? 1 : 0
-
-    const res = await page.evaluate(
-      async ({ id, receive }) => {
-        const g = globalThis as unknown as {
-          document: { querySelector: (s: string) => { getAttribute: (n: string) => string | null } | null }
-          fetch: (u: string, o: unknown) => Promise<{ status: number; ok: boolean; text: () => Promise<string> }>
-          URLSearchParams: new (init: Record<string, string>) => unknown
-        }
-        const token = g.document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
-        const url = `/artist/became_fan_save/artist_${id}?become_a_fan=1&receive_emails=${receive}&without_modal=true`
-        try {
-          const r = await g.fetch(url, {
-            method: 'POST',
-            credentials: 'same-origin',
-            headers: {
-              'X-CSRF-Token': token,
-              'X-Requested-With': 'XMLHttpRequest',
-              'Content-Type': 'application/x-www-form-urlencoded'
-            },
-            body: new g.URLSearchParams({ authenticity_token: token })
-          })
-          return { status: r.status, ok: r.ok, text: (await r.text()).slice(0, 120) }
-        } catch (e) {
-          return { status: 0, ok: false, text: String(e) }
-        }
-      },
-      { id, receive }
-    )
-
-    if (res.status === 0 || res.status >= 500) {
-      throw new RecoverableError(`Add request failed for ${name} (status ${res.status})`)
+    const fan = await this.postFan(page, `/artist/become_fan/${id}?without_modal=true`)
+    if (fan.status === 0 || fan.status >= 500) {
+      throw new RecoverableError(`Save failed for ${name} (status ${fan.status})`)
     }
-    if (!res.ok && !/modal_close|success|already/i.test(res.text)) {
-      throw new RecoverableError(`Add not confirmed for ${name} (status ${res.status})`)
+    const fanned = fan.ok && /became_fan|already[_\s-]?fan|success/i.test(fan.text)
+    if (!fanned) {
+      throw new RecoverableError(`Save not confirmed for ${name} (status ${fan.status}: ${fan.text.slice(0, 40)})`)
     }
+
+    // Step 2 — Receive updates? Yes (best-effort; the save already succeeded).
+    let updatesEnabled = false
+    if (opts.receiveUpdates) {
+      status('Accepting updates…')
+      const upd = await this.postFan(
+        page,
+        `/artist/became_fan_save/artist_${id}?become_a_fan=1&receive_emails=1&without_modal=true`
+      )
+      updatesEnabled = upd.ok || /modal_close|success/i.test(upd.text)
+      if (!updatesEnabled) this.log.warn('library', `Updates not confirmed for ${name}`, { artist: name })
+    }
+
     status('Completed')
-    this.log.info('library', `Added to library: ${name}${opts.receiveUpdates ? ' (updates on)' : ''}`, { artist: name })
-    return { outcome: 'saved', updatesEnabled: opts.receiveUpdates }
+    this.log.info('library', `Added to library: ${name}${updatesEnabled ? ' (updates on)' : ''}`, { artist: name })
+    return { outcome: 'saved', updatesEnabled }
+  }
+
+  /** POST an authenticated fan action from the page context (with CSRF token). */
+  private async postFan(page: Page, url: string): Promise<{ status: number; ok: boolean; text: string }> {
+    return page.evaluate(async (u: string) => {
+      const g = globalThis as unknown as {
+        document: { querySelector: (s: string) => { getAttribute: (n: string) => string | null } | null }
+        fetch: (u: string, o: unknown) => Promise<{ status: number; ok: boolean; text: () => Promise<string> }>
+        URLSearchParams: new (init: Record<string, string>) => unknown
+      }
+      const token = g.document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
+      try {
+        const r = await g.fetch(u, {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: {
+            'X-CSRF-Token': token,
+            'X-Requested-With': 'XMLHttpRequest',
+            'Content-Type': 'application/x-www-form-urlencoded'
+          },
+          body: new g.URLSearchParams({ authenticity_token: token })
+        })
+        return { status: r.status, ok: r.ok, text: (await r.text()).slice(0, 160) }
+      } catch (e) {
+        return { status: 0, ok: false, text: String(e) }
+      }
+    }, url)
   }
 
   /** Wait for the "<name> has been added to your Library" toast. */
