@@ -241,12 +241,18 @@ export class ConfigManager extends TypedEmitter<ConfigEvents> {
     return ConfigManager.resolvePaths(this.userDataDir, profileId)
   }
 
-  /** Profiles enriched with active flag and whether a session is saved. */
+  /**
+   * Profiles enriched with active flag and whether a session is saved. The
+   * database-derived fields (savedCount, lastActivity) default here and are
+   * filled by the IPC layer, which has the global database.
+   */
   profilesInfo(): ProfileInfo[] {
     return this.config.profiles.map((p) => ({
       ...p,
       active: p.id === this.config.activeProfileId,
-      hasSession: this.profileHasSession(p.id)
+      hasSession: this.profileHasSession(p.id),
+      savedCount: 0,
+      lastActivity: null
     }))
   }
 

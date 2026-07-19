@@ -7,7 +7,7 @@ import { SettingsPanel } from './components/SettingsPanel'
 import { DatabasePanel } from './components/DatabasePanel'
 import { LogsPanel } from './components/LogsPanel'
 import { ProfilesPanel } from './components/ProfilesPanel'
-import { Dot } from './components/common'
+import { Avatar, Dot } from './components/common'
 
 type Tab = 'dashboard' | 'accounts' | 'locations' | 'settings' | 'database' | 'logs'
 
@@ -100,7 +100,7 @@ export function App(): React.JSX.Element {
           style={{ marginBottom: 8, borderColor: 'var(--border)', background: 'var(--bg-elev)' }}
           title="Manage accounts"
         >
-          <Dot state={status?.authStatus === 'authenticated' ? 'ok' : 'warn'} />
+          <Avatar name={activeProfile?.name ?? '?'} size={28} />
           <div style={{ overflow: 'hidden' }}>
             <div style={{ fontSize: 11, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: 0.5 }}>
               Account
@@ -172,7 +172,13 @@ export function App(): React.JSX.Element {
 
         {tab === 'dashboard' && <Dashboard status={status} health={health} />}
         {tab === 'accounts' && (
-          <ProfilesPanel profiles={profiles} reload={reloadProfiles} onSwitched={onSwitched} notify={notify} />
+          <ProfilesPanel
+            profiles={profiles}
+            reload={reloadProfiles}
+            onSwitched={onSwitched}
+            status={status}
+            notify={notify}
+          />
         )}
         {tab === 'locations' && config && <LocationsPanel config={config} onChange={setConfig} notify={notify} />}
         {tab === 'settings' && config && <SettingsPanel config={config} onChange={setConfig} notify={notify} />}

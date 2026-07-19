@@ -1,24 +1,43 @@
-import React, { useState } from 'react'
-import type { ProfileInfo } from '@shared/types'
-import { api, unwrap } from '../api'
-import { Dot } from './common'
+import React, { useEffect, useState } from 'react'
+import type { ProfileInfo, RunStatus } from '@shared/types'
+import { api, fmtAgo, unwrap } from '../api'
+import { Avatar } from './common'
+
+/** Live status label + badge class for an account. */
+function accountStatus(p: ProfileInfo, status: RunStatus | null): { label: string; cls: string } {
+  const rot = status?.rotation
+  const running = ['starting', 'authenticating', 'navigating', 'scanning', 'processing'].includes(
+    status?.engineState ?? ''
+  )
+  if (running && rot?.activeProfileId === p.id) return { label: 'Running', cls: 'saved' }
+  if (!p.hasSession) return { label: 'Not signed in', cls: 'failed' }
+  if (p.active) return { label: 'Active', cls: 'saved' }
+  return { label: 'Ready', cls: 'skipped' }
+}
 
 /**
  * Multi-account switcher (Telegram-style). Each account is a fully isolated
- * ReverbNation session with its own saved-artist history. Add accounts, switch
- * the active one, rename, or remove.
+ * ReverbNation session; the shared database tracks how many artists each has
+ * saved and when it was last active. Add accounts, switch, rename, or remove.
  */
 export function ProfilesPanel({
   profiles,
   reload,
   onSwitched,
+  status,
   notify
 }: {
   profiles: ProfileInfo[]
   reload: () => Promise<void>
   onSwitched: () => void
+  status: RunStatus | null
   notify: (msg: string, err?: boolean) => void
 }): React.JSX.Element {
+  // Refresh counts/last-activity while a run is in progress.
+  useEffect(() => {
+    const t = setInterval(() => reload().catch(() => undefined), 4000)
+    return () => clearInterval(t)
+  }, [reload])
   const [newName, setNewName] = useState('')
   const [busy, setBusy] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -90,7 +109,7 @@ export function ProfilesPanel({
               }}
             >
               <div className="row" style={{ gap: 12 }}>
-                <Dot state={p.hasSession ? 'ok' : 'warn'} />
+                <Avatar name={p.name} />
                 <div>
                   {editingId === p.id ? (
                     <input
@@ -102,17 +121,16 @@ export function ProfilesPanel({
                       style={{ minWidth: 200 }}
                     />
                   ) : (
-                    <div style={{ fontWeight: 700 }}>
+                    <div style={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
                       {p.name}
-                      {p.active && (
-                        <span className="badge saved" style={{ marginLeft: 8 }}>
-                          Active
-                        </span>
-                      )}
+                      {(() => {
+                        const st = accountStatus(p, status)
+                        return <span className={`badge ${st.cls}`}>{st.label}</span>
+                      })()}
                     </div>
                   )}
-                  <div className="muted" style={{ fontSize: 12 }}>
-                    {p.hasSession ? 'Signed in · session saved' : 'Not signed in yet'}
+                  <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
+                    {p.hasSession ? 'Signed in' : 'Not signed in yet'} · {p.savedCount} saved · active {fmtAgo(p.lastActivity)}
                   </div>
                 </div>
               </div>

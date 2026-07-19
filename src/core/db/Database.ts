@@ -212,6 +212,14 @@ export class Database {
     return Object.fromEntries(rows.map((r) => [r.id, r.c]))
   }
 
+  /** Per-profile most-recent processed timestamp. */
+  lastActivityByProfile(): Record<string, string> {
+    const rows = this.db
+      .prepare(`SELECT profile_id AS id, MAX(processed_at) AS t FROM artists WHERE profile_id IS NOT NULL AND processed_at IS NOT NULL GROUP BY profile_id`)
+      .all() as Array<{ id: string; t: string | null }>
+    return Object.fromEntries(rows.filter((r) => r.t).map((r) => [r.id, r.t as string]))
+  }
+
   /** Count of artists in the 'saved' state (used for run targeting). */
   savedCount(): number {
     return (this.db.prepare(`SELECT COUNT(*) AS c FROM artists WHERE status = 'saved'`).get() as { c: number }).c

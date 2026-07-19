@@ -72,7 +72,18 @@ export function registerIpc({ getContainer, getWindow, activateProfile }: IpcDep
   ipcMain.handle(IpcChannels.configReset, wrap(() => c().config.reset()))
 
   /* ---------------------------- Profiles ------------------------------ */
-  ipcMain.handle(IpcChannels.profilesList, wrap(() => c().config.profilesInfo()))
+  ipcMain.handle(
+    IpcChannels.profilesList,
+    wrap(() => {
+      const counts = c().db.savedCountByProfile()
+      const activity = c().db.lastActivityByProfile()
+      return c().config.profilesInfo().map((p) => ({
+        ...p,
+        savedCount: counts[p.id] ?? 0,
+        lastActivity: activity[p.id] ?? null
+      }))
+    })
+  )
   ipcMain.handle(IpcChannels.profileAdd, wrap((_e, name) => c().config.addProfile((name as string) ?? '')))
   ipcMain.handle(IpcChannels.profileRename, wrap((_e, id, name) => c().config.renameProfile(id as string, name as string)))
   ipcMain.handle(

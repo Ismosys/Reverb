@@ -52,6 +52,10 @@ export interface ProfileInfo extends Profile {
   active: boolean
   /** Whether this profile has a saved browser session (cookies present). */
   hasSession: boolean
+  /** Total artists this account has saved (from the global database). */
+  savedCount: number
+  /** ISO timestamp of this account's most recent processed artist. */
+  lastActivity: string | null
 }
 
 /** Delay range in milliseconds used to randomise pacing. */
