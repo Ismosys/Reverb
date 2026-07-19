@@ -1,18 +1,26 @@
 import React, { useCallback, useEffect, useState } from 'react'
-import type { ArtistRecord, ArtistStatus, ReportFormat } from '@shared/types'
+import type { ArtistRecord, ArtistStatus, DatabaseStats, ReportFormat } from '@shared/types'
 import { api, fmtDuration, unwrap } from '../api'
 
 const STATUSES: Array<ArtistStatus | 'all'> = ['all', 'saved', 'failed', 'skipped', 'pending', 'processing']
 
-/** Searchable, exportable artist database view. */
+function fmtBytes(n: number): string {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`
+}
+
+/** Searchable, exportable artist database view (global, shared across accounts). */
 export function DatabasePanel({ notify }: { notify: (msg: string, err?: boolean) => void }): React.JSX.Element {
   const [rows, setRows] = useState<ArtistRecord[]>([])
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState<ArtistStatus | 'all'>('all')
+  const [stats, setStats] = useState<DatabaseStats | null>(null)
 
   const load = useCallback(async () => {
     try {
       setRows(await unwrap(api.db.query({ search, status, limit: 500 })))
+      setStats(await unwrap(api.db.stats()))
     } catch (e) {
       notify((e as Error).message, true)
     }
@@ -50,6 +58,38 @@ export function DatabasePanel({ notify }: { notify: (msg: string, err?: boolean)
 
   return (
     <div className="grid" style={{ gap: 14 }}>
+      {stats && (
+        <div className="grid stats">
+          <div className="card stat">
+            <div className="label">Total Artists</div>
+            <div className="value">{stats.totalArtists}</div>
+          </div>
+          <div className="card stat">
+            <div className="label">Saved</div>
+            <div className="value ok">{stats.saved}</div>
+          </div>
+          <div className="card stat">
+            <div className="label">Duplicates Prevented</div>
+            <div className="value warn">{stats.duplicatesPrevented}</div>
+          </div>
+          <div className="card stat">
+            <div className="label">Accounts Used</div>
+            <div className="value">{stats.profilesUsed}</div>
+          </div>
+          <div className="card stat">
+            <div className="label">Avg Time</div>
+            <div className="value">{fmtDuration(stats.averageProcessingMs)}</div>
+          </div>
+          <div className="card stat">
+            <div className="label">Sessions</div>
+            <div className="value">{stats.sessions}</div>
+          </div>
+          <div className="card stat">
+            <div className="label">DB Size</div>
+            <div className="value">{fmtBytes(stats.sizeBytes)}</div>
+          </div>
+        </div>
+      )}
       <div className="card">
         <div className="row" style={{ justifyContent: 'space-between' }}>
           <div className="row">

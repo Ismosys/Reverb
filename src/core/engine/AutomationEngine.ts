@@ -15,6 +15,7 @@ import type { NavigationService } from '../services/NavigationService'
 import type { Page } from 'playwright'
 import type { DiscoveredArtist, TrendingScanner } from '../services/TrendingScanner'
 import type { ArtistProcessor } from '../services/ArtistProcessor'
+import type { ProfileRotationManager } from '../rotation/ProfileRotationManager'
 import type { HealthMonitor } from '../health/HealthMonitor'
 import type { ReportService } from '../reporting/ReportService'
 import { TypedEmitter } from '../utils/events'
@@ -40,6 +41,7 @@ export interface EngineDeps {
   auth: AuthService
   nav: NavigationService
   scanner: TrendingScanner
+  rotation: ProfileRotationManager
   processorFactory: () => ArtistProcessor
   health: HealthMonitor
   report: ReportService
@@ -70,6 +72,8 @@ export class AutomationEngine extends TypedEmitter<EngineEvents> {
   private currentArtistNumber = 0
   private currentOperation: string | null = null
   private consecutiveFailures = 0
+  private rotationActive = false
+  private currentProfileId: string | null = null
 
   // Run counters
   private target = 0
@@ -115,7 +119,8 @@ export class AutomationEngine extends TypedEmitter<EngineEvents> {
       elapsedMs,
       etaMs,
       speedPerMin: Math.round(speedPerMin * 10) / 10,
-      startedAt: this.startedAt ? new Date(this.startedAt).toISOString() : null
+      startedAt: this.startedAt ? new Date(this.startedAt).toISOString() : null,
+      rotation: this.rotationActive ? this.deps.rotation.status(this.deps.config.get().automation.perProfileLimit) : null
     }
   }
 
@@ -243,20 +248,38 @@ export class AutomationEngine extends TypedEmitter<EngineEvents> {
     return this.getStatus()
   }
 
-  /** The ordered automation workflow. Runs one pass per resolved location. */
+  /**
+   * The automation workflow. Either a single-account run (existing behaviour) or
+   * a pooled run that rotates across all logged-in accounts toward one global
+   * target, respecting the per-account limit.
+   */
   private async runWorkflow(): Promise<void> {
     const cfg = this.deps.config.get()
     const settings = cfg.automation
 
-    // 1. Launch browser with the persistent profile.
+    const rotate = settings.rotateProfiles && this.deps.rotation.eligibleProfiles().length > 1
+    this.deps.rotation.begin(rotate)
+    this.rotationActive = rotate
+
+    if (!rotate) {
+      await this.runSingleAccount(settings)
+    } else {
+      await this.runPooled(settings)
+    }
+
+    this.currentProfileId = null
+    this.currentArtist = null
+    this.setOperation(null)
+  }
+
+  /** Classic single-account run: launch, verify auth, process locations. */
+  private async runSingleAccount(settings: AutomationSettings): Promise<void> {
+    const cfg = this.deps.config.get()
+    this.currentProfileId = this.deps.config.getActiveProfile().id
     this.setState('starting')
     this.setOperation('Launching browser')
-    await this.deps.browser.launch({
-      profilePath: cfg.paths.browserProfilePath,
-      headless: settings.headless
-    })
+    await this.deps.browser.launch({ profilePath: cfg.paths.browserProfilePath, headless: settings.headless })
 
-    // 2. Verify authentication (once for the whole run).
     this.setState('authenticating')
     this.setOperation('Verifying authentication')
     this.authStatus = await this.deps.auth.checkAuthenticated()
@@ -264,23 +287,76 @@ export class AutomationEngine extends TypedEmitter<EngineEvents> {
     if (this.authStatus !== 'authenticated') {
       throw new AuthenticationError(`Session is ${this.authStatus}. Please log in.`)
     }
+    await this.runLocationPasses(settings, this.target)
+  }
 
-    // 3. One pass per location (single-location runs use `[location]` or `[null]`).
-    //    The total target is split across passes; the remainder is front-loaded.
+  /**
+   * Pooled run: treat every logged-in account as one pool. Process the current
+   * account up to its limit, then transparently switch to the next, continuing
+   * from where the pool left off (global dedup guarantees no repeats) until the
+   * target is met or every account has reached its limit.
+   */
+  private async runPooled(settings: AutomationSettings): Promise<void> {
+    const perLimit = settings.perProfileLimit
+    let profile = this.deps.rotation.current()
+    let first = true
+
+    while (profile && !this.signal.aborted && this.saved < this.target) {
+      if (settings.stopAfterFailures > 0 && this.consecutiveFailures >= settings.stopAfterFailures) break
+      this.currentProfileId = profile.id
+      const path = this.deps.config.profilePaths(profile.id).browserProfilePath
+
+      // Activate this account's session (reuse the browser, just swap profile).
+      this.setState(first ? 'starting' : 'navigating')
+      this.setOperation(first ? `Starting account: ${profile.name}` : `Switching to account: ${profile.name}`)
+      if (first) {
+        await this.deps.browser.launch({ profilePath: path, headless: settings.headless })
+      } else {
+        await this.deps.browser.switchProfile({ profilePath: path, headless: settings.headless })
+      }
+      first = false
+
+      // Verify this account is logged in; skip (not fail) if not.
+      this.setState('authenticating')
+      this.setOperation(`Verifying account: ${profile.name}`)
+      this.authStatus = await this.deps.auth.checkAuthenticated()
+      this.push()
+      if (this.authStatus !== 'authenticated') {
+        this.deps.log.warn('engine', `Account "${profile.name}" is not logged in — skipping`, { status: 'auth' })
+        profile = this.deps.rotation.advance()
+        continue
+      }
+
+      // This account processes min(limit, remaining-global) fresh saves.
+      const remaining = this.target - this.saved
+      const cap = perLimit > 0 ? Math.min(perLimit, remaining) : remaining
+      this.deps.log.info('engine', `Account "${profile.name}" starting (cap ${cap}, ${this.saved}/${this.target} global)`)
+      await this.runLocationPasses(settings, cap)
+
+      profile = this.deps.rotation.advance()
+    }
+
+    if (this.saved < this.target && !this.signal.aborted) {
+      this.deps.log.warn(
+        'engine',
+        `Target not reached: ${this.saved}/${this.target}. All ${this.deps.rotation.eligibleProfiles().length} account(s) reached their limit.`,
+        { status: 'partial' }
+      )
+    }
+  }
+
+  /** Run the resolved location(s) for the current account, up to `cap` saves. */
+  private async runLocationPasses(settings: AutomationSettings, cap: number): Promise<void> {
     const passes = this.runLocations.length ? this.runLocations : [null]
-    const passTargets = splitEvenly(this.target, passes.length)
+    const passTargets = splitEvenly(cap, passes.length)
     for (let i = 0; i < passes.length; i++) {
       const passTarget = passTargets[i]
       if (this.signal.aborted || this.saved >= this.target || passTarget <= 0) break
       if (settings.stopAfterFailures > 0 && this.consecutiveFailures >= settings.stopAfterFailures) break
+      if (this.rotationActive && this.deps.rotation.limitReached(settings.perProfileLimit)) break
       this.currentLocation = passes[i]
-      const suffix = passes.length > 1 ? ` (${i + 1}/${passes.length}, target ${passTarget})` : ''
-      this.deps.log.info('engine', `Location pass${suffix}: ${this.currentLocation?.label ?? 'default'}`)
       await this.runLocationPass(this.currentLocation, settings, passTarget)
     }
-
-    this.currentArtist = null
-    this.setOperation(null)
   }
 
   /** Scan and process a single location up to `passTarget` fresh saves. */
@@ -397,6 +473,7 @@ export class AutomationEngine extends TypedEmitter<EngineEvents> {
       mode,
       locationLabel: pass.locationLabel,
       knownSaved: mode === 'row' ? artist.alreadySaved : false,
+      profileId: this.currentProfileId,
       signal: this.signal,
       onStatus: (msg) => this.setOperation(`${artist.name} — ${msg}`)
     })
@@ -405,6 +482,7 @@ export class AutomationEngine extends TypedEmitter<EngineEvents> {
       case 'saved':
         this.saved++
         pass.savedThisPass++
+        this.deps.rotation.recordSave()
         this.consecutiveFailures = 0
         break
       case 'skipped':
@@ -422,6 +500,7 @@ export class AutomationEngine extends TypedEmitter<EngineEvents> {
   /** Whether the current pass has hit its target or the failure ceiling. */
   private passDone(pass: PassContext): boolean {
     if (pass.savedThisPass >= pass.passTarget || this.saved >= this.target) return true
+    if (this.rotationActive && this.deps.rotation.limitReached(pass.settings.perProfileLimit)) return true
     if (pass.settings.stopAfterFailures > 0 && this.consecutiveFailures >= pass.settings.stopAfterFailures) {
       this.deps.log.error('engine', `Stopping after ${this.consecutiveFailures} consecutive failures`)
       return true

@@ -27,15 +27,32 @@ export class ConfigManager extends TypedEmitter<ConfigEvents> {
     this.config = config
   }
 
-  /** Resolve the on-disk paths for a given profile id. */
+  /**
+   * Resolve the on-disk paths for a given profile.
+   *
+   * The database and reports are GLOBAL (shared across every account) so that
+   * duplicate artists are prevented pool-wide and progress is centralized. Only
+   * the browser session is per-profile (isolated logins). Logs are shared.
+   */
   static resolvePaths(userDataDir: string, profileId: string): PathsConfig {
-    const dir = join(userDataDir, 'profiles', profileId)
     return {
-      databasePath: join(dir, 'data', 'reverb.db'),
-      browserProfilePath: join(dir, 'browser-profile'),
-      reportsPath: join(dir, 'reports'),
-      // Logs are shared across profiles.
+      databasePath: join(userDataDir, 'data', 'reverb.db'),
+      browserProfilePath: join(userDataDir, 'profiles', profileId, 'browser-profile'),
+      reportsPath: join(userDataDir, 'reports'),
       logsPath: join(userDataDir, 'logs', 'reverb.log')
+    }
+  }
+
+  /** Promote a legacy per-profile database/reports to the global location. */
+  private static migrateToGlobal(userDataDir: string, profileId: string): void {
+    try {
+      for (const name of ['data', 'reports']) {
+        const legacy = join(userDataDir, 'profiles', profileId, name)
+        const global = join(userDataDir, name)
+        if (existsSync(legacy) && !existsSync(global)) renameSync(legacy, global)
+      }
+    } catch {
+      // Best-effort; a fresh global DB works regardless.
     }
   }
 
@@ -83,6 +100,8 @@ export class ConfigManager extends TypedEmitter<ConfigEvents> {
       ? raw.activeProfileId
       : profiles[0].id
     if (!hadProfiles) ConfigManager.migrateLegacy(userDataDir, activeProfileId)
+    // Promote the (default) profile's data/reports to the global location.
+    ConfigManager.migrateToGlobal(userDataDir, activeProfileId)
 
     const paths = ConfigManager.resolvePaths(userDataDir, activeProfileId)
     const defaults = buildDefaultConfig(paths)
@@ -215,6 +234,11 @@ export class ConfigManager extends TypedEmitter<ConfigEvents> {
 
   getActiveProfile(): Profile {
     return this.config.profiles.find((p) => p.id === this.config.activeProfileId) ?? this.config.profiles[0]
+  }
+
+  /** Resolve paths for any profile (used when rotating the active browser). */
+  profilePaths(profileId: string): PathsConfig {
+    return ConfigManager.resolvePaths(this.userDataDir, profileId)
   }
 
   /** Profiles enriched with active flag and whether a session is saved. */

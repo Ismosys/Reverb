@@ -101,6 +101,17 @@ export function SettingsPanel({
         <Field label="Max execution time (ms, 0 = ∞)">
           <input type="number" min={0} value={a.maxExecutionTimeMs} onChange={num('maxExecutionTimeMs')} />
         </Field>
+        <Field label="Max artists per account (rotation)">
+          <select value={a.perProfileLimit} onChange={(e) => setA({ ...a, perProfileLimit: Number(e.target.value) })}>
+            <option value={25}>25</option>
+            <option value={50}>50</option>
+            <option value={75}>75</option>
+            <option value={100}>100</option>
+            <option value={150}>150</option>
+            <option value={200}>200</option>
+            <option value={0}>Unlimited</option>
+          </select>
+        </Field>
         <Field label="Report format">
           <select
             value={a.reportFormat}
@@ -120,6 +131,11 @@ export function SettingsPanel({
           label="Turbo mode (fastest — minimal pacing)"
           checked={a.turbo}
           onChange={bool('turbo')}
+        />
+        <Toggle
+          label="Rotate across all accounts (account pool)"
+          checked={a.rotateProfiles}
+          onChange={bool('rotateProfiles')}
         />
         <Toggle
           label="Cycle through multiple locations"

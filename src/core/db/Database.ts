@@ -1,7 +1,7 @@
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, statSync } from 'node:fs'
 import { dirname } from 'node:path'
 import BetterSqlite3, { type Database as Sqlite } from 'better-sqlite3'
-import type { ArtistQuery, ArtistRecord, ArtistStatus } from '@shared/types'
+import type { ArtistQuery, ArtistRecord, ArtistStatus, DatabaseStats } from '@shared/types'
 import { AppError } from '../utils/errors'
 
 /** Row shape as stored in SQLite (booleans as 0/1). */
@@ -14,6 +14,7 @@ interface ArtistRow {
   retry_count: number
   failure_reason: string | null
   location_label: string | null
+  profile_id: string | null
   duration_ms: number | null
   created_at: string
   processed_at: string | null
@@ -29,6 +30,7 @@ function toRecord(row: ArtistRow): ArtistRecord {
     retryCount: row.retry_count,
     failureReason: row.failure_reason,
     locationLabel: row.location_label,
+    profileId: row.profile_id ?? null,
     durationMs: row.duration_ms,
     createdAt: row.created_at,
     processedAt: row.processed_at
@@ -42,9 +44,11 @@ function toRecord(row: ArtistRow): ArtistRecord {
  */
 export class Database {
   private readonly db: Sqlite
+  private readonly dbPath: string
 
   constructor(dbPath: string) {
     mkdirSync(dirname(dbPath), { recursive: true })
+    this.dbPath = dbPath
     this.db = new BetterSqlite3(dbPath)
     this.db.pragma('journal_mode = WAL')
     this.db.pragma('foreign_keys = ON')
@@ -62,12 +66,14 @@ export class Database {
         retry_count     INTEGER NOT NULL DEFAULT 0,
         failure_reason  TEXT,
         location_label  TEXT,
+        profile_id      TEXT,
         duration_ms     INTEGER,
         created_at      TEXT NOT NULL,
         processed_at    TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_artists_status ON artists(status);
       CREATE INDEX IF NOT EXISTS idx_artists_name ON artists(name);
+      CREATE INDEX IF NOT EXISTS idx_artists_profile ON artists(profile_id);
 
       CREATE TABLE IF NOT EXISTS sessions (
         id           TEXT PRIMARY KEY,
@@ -81,6 +87,11 @@ export class Database {
         skipped      INTEGER NOT NULL DEFAULT 0
       );
     `)
+    // Add profile_id to databases created before multi-account support.
+    const cols = this.db.prepare(`PRAGMA table_info(artists)`).all() as Array<{ name: string }>
+    if (!cols.some((c) => c.name === 'profile_id')) {
+      this.db.exec(`ALTER TABLE artists ADD COLUMN profile_id TEXT`)
+    }
   }
 
   /* ----------------------------- Artists ---------------------------- */
@@ -105,10 +116,15 @@ export class Database {
     return row ? toRecord(row) : null
   }
 
-  /** True when the artist already reached a terminal, successful state. */
+  /**
+   * True when the artist has already been saved by ANY account (global dedup).
+   * A cheap COUNT so it can be called before every artist is opened.
+   */
   isCompleted(artistId: string): boolean {
-    const row = this.getArtist(artistId)
-    return row?.status === 'saved'
+    const row = this.db
+      .prepare(`SELECT 1 FROM artists WHERE artist_id = ? AND status = 'saved' LIMIT 1`)
+      .get(artistId)
+    return !!row
   }
 
   markProcessing(artistId: string): void {
@@ -128,6 +144,8 @@ export class Database {
       failureReason?: string | null
       durationMs?: number | null
       incrementRetry?: boolean
+      /** The account that processed this artist (recorded on save). */
+      profileId?: string | null
     }
   ): ArtistRecord {
     this.db
@@ -137,6 +155,7 @@ export class Database {
            updates_enabled = COALESCE(@updatesEnabled, updates_enabled),
            failure_reason = @failureReason,
            duration_ms = @durationMs,
+           profile_id = COALESCE(@profileId, profile_id),
            retry_count = retry_count + @retryInc,
            processed_at = @now
          WHERE artist_id = @artistId`
@@ -147,12 +166,50 @@ export class Database {
         updatesEnabled: result.updatesEnabled === undefined ? null : result.updatesEnabled ? 1 : 0,
         failureReason: result.failureReason ?? null,
         durationMs: result.durationMs ?? null,
+        profileId: result.profileId ?? null,
         retryInc: result.incrementRetry ? 1 : 0,
         now: new Date().toISOString()
       })
     const rec = this.getArtist(artistId)
     if (!rec) throw new AppError(`Artist ${artistId} vanished during update`, { code: 'DB' })
     return rec
+  }
+
+  /** Aggregate database statistics for the dashboard. */
+  stats(): DatabaseStats {
+    const one = <T>(sql: string): T => this.db.prepare(sql).get() as T
+    const saved = this.countByStatus('saved')
+    const skipped = this.countByStatus('skipped')
+    const failed = this.countByStatus('failed')
+    const total = (one<{ c: number }>('SELECT COUNT(*) AS c FROM artists')).c
+    const profilesUsed = (one<{ c: number }>(`SELECT COUNT(DISTINCT profile_id) AS c FROM artists WHERE profile_id IS NOT NULL`)).c
+    const avg = (one<{ a: number | null }>(`SELECT AVG(duration_ms) AS a FROM artists WHERE status = 'saved' AND duration_ms > 0`)).a
+    const sessions = (one<{ c: number }>('SELECT COUNT(*) AS c FROM sessions')).c
+    let sizeBytes = 0
+    try {
+      sizeBytes = statSync(this.dbPath).size
+    } catch {
+      sizeBytes = 0
+    }
+    return {
+      totalArtists: total,
+      saved,
+      skipped,
+      failed,
+      duplicatesPrevented: skipped,
+      profilesUsed,
+      averageProcessingMs: avg ? Math.round(avg) : 0,
+      sessions,
+      sizeBytes
+    }
+  }
+
+  /** Per-profile saved counts (for the account statistics panel). */
+  savedCountByProfile(): Record<string, number> {
+    const rows = this.db
+      .prepare(`SELECT profile_id AS id, COUNT(*) AS c FROM artists WHERE status = 'saved' AND profile_id IS NOT NULL GROUP BY profile_id`)
+      .all() as Array<{ id: string; c: number }>
+    return Object.fromEntries(rows.map((r) => [r.id, r.c]))
   }
 
   /** Count of artists in the 'saved' state (used for run targeting). */

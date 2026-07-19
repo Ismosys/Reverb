@@ -14,7 +14,9 @@ describe('ConfigManager profiles', () => {
     expect(cfg.listProfiles()).toHaveLength(1)
     expect(cfg.getActiveProfile().id).toBe('default')
     expect(cfg.get().paths.browserProfilePath.replace(/\\/g, '/')).toContain('profiles/default/browser-profile')
-    expect(cfg.get().paths.databasePath.replace(/\\/g, '/')).toContain('profiles/default/data/reverb.db')
+    // Database is GLOBAL (shared across accounts), not per-profile.
+    expect(cfg.get().paths.databasePath.replace(/\\/g, '/')).toMatch(/\/data\/reverb\.db$/)
+    expect(cfg.get().paths.databasePath.replace(/\\/g, '/')).not.toContain('profiles/')
   })
 
   it('adds, switches, and isolates each account’s paths', () => {
@@ -42,8 +44,9 @@ describe('ConfigManager profiles', () => {
     writeFileSync(join(dir, 'data', 'reverb.db'), 'x')
 
     const cfg = ConfigManager.load(dir)
+    // Session stays per-profile; the database is promoted to the GLOBAL location.
     expect(existsSync(join(dir, 'profiles', 'default', 'browser-profile', 'Default', 'Cookies'))).toBe(true)
-    expect(existsSync(join(dir, 'profiles', 'default', 'data', 'reverb.db'))).toBe(true)
+    expect(existsSync(join(dir, 'data', 'reverb.db'))).toBe(true)
     expect(existsSync(join(dir, 'browser-profile'))).toBe(false) // moved, not copied
     expect(cfg.profileHasSession('default')).toBe(true)
   })

@@ -74,6 +74,40 @@ export function Dashboard({
         <Stat label="ETA" value={fmtDuration(s?.etaMs)} />
       </div>
 
+      {/* Account rotation */}
+      {s?.rotation?.enabled && (
+        <div className="card">
+          <div className="section-title" style={{ margin: '0 0 12px' }}>
+            Account Rotation
+          </div>
+          <div className="row" style={{ gap: 22, flexWrap: 'wrap' }}>
+            <div className="row" style={{ gap: 8 }}>
+              <span className="muted">Active account</span>
+              <strong>{s.rotation.activeProfileName ?? '—'}</strong>
+            </div>
+            <div className="row" style={{ gap: 8 }}>
+              <span className="muted">This account</span>
+              <strong>
+                {s.rotation.profileProcessed}
+                {s.rotation.profileLimit > 0 ? ` of ${s.rotation.profileLimit}` : ''}
+              </strong>
+            </div>
+            <div className="row" style={{ gap: 8 }}>
+              <span className="muted">Rotation</span>
+              <strong>
+                #{s.rotation.rotationNumber} · {s.rotation.profilesFinished}/{s.rotation.profilesTotal} finished
+              </strong>
+            </div>
+            {s.rotation.profileLimit > 0 && (
+              <div className="row" style={{ gap: 8 }}>
+                <span className="muted">Next rotation in</span>
+                <strong>{Math.max(0, s.rotation.profileLimit - s.rotation.profileProcessed)} artists</strong>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Health */}
       <div className="card">
         <div className="section-title" style={{ margin: '0 0 12px' }}>

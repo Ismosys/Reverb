@@ -34,10 +34,24 @@ a persistent SQLite database.
 ## Features
 
 - **Multiple accounts (Telegram-style)** — add several ReverbNation accounts,
-  each with its **own isolated browser session** (so they all stay logged in)
-  and its **own saved-artist history**. Switch the active account from the
-  **Accounts** tab or the sidebar; the automation always runs on the active one.
-  Upgrading users' existing login is migrated automatically into "Account 1".
+  each with its **own isolated browser session** (so they all stay logged in).
+  Switch the active account from the **Accounts** tab or the sidebar. Upgrading
+  users' existing login is migrated automatically into "Account 1".
+- **Account-pool rotation** — treat every logged-in account as one pool. Enter a
+  single **global target** (e.g. 1,000) and a **per-account limit** (25/50/75/
+  100/150/200/unlimited). One account processes up to its limit, then the engine
+  **automatically switches to the next account** (reusing its saved session) and
+  continues from where the pool left off — no restart, no manual step — until the
+  target is met or every account has reached its limit. The
+  [`ProfileRotationManager`](src/core/rotation/ProfileRotationManager.ts) owns
+  the pool; the engine drives it. Live-verified: 2 accounts × 8 → 16 saved, one
+  per account, zero duplicates.
+- **Global artist database** — a single shared database records every artist
+  regardless of which account added it (with the account id). Before touching an
+  artist the engine checks it globally and **skips** anything already saved by
+  **any** account — no duplicate work across the whole pool. The Database tab
+  shows pool-wide stats (total, saved, duplicates prevented, accounts used, avg
+  time, sessions, size).
 - **Persistent authentication** — log in once in a real browser window; the
   Playwright persistent profile keeps the session across restarts. Expired
   sessions are detected and you're prompted to re-authenticate only when needed.

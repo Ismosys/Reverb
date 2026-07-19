@@ -164,6 +164,7 @@ export function registerIpc({ getContainer, getWindow, activateProfile }: IpcDep
 
   /* ---------------------------- Database ------------------------------ */
   ipcMain.handle(IpcChannels.dbQuery, wrap((_e, q) => c().db.query((q as ArtistQuery) ?? {})))
+  ipcMain.handle(IpcChannels.dbStats, wrap(() => c().db.stats()))
   ipcMain.handle(IpcChannels.dbDelete, wrap((_e, id) => c().db.deleteArtist(id as string)))
   ipcMain.handle(IpcChannels.dbClear, wrap(() => c().db.clearAll()))
   ipcMain.handle(

@@ -9,6 +9,7 @@ import { BrowserManager } from '@core/browser/BrowserManager'
 import { AuthService } from '@core/services/AuthService'
 import { NavigationService } from '@core/services/NavigationService'
 import { TrendingScanner } from '@core/services/TrendingScanner'
+import { ProfileRotationManager } from '@core/rotation/ProfileRotationManager'
 import { LibraryManager } from '@core/services/LibraryManager'
 import { ArtistProcessor } from '@core/services/ArtistProcessor'
 import { HumanBehavior } from '@core/services/HumanBehavior'
@@ -64,6 +65,7 @@ describe.skipIf(!RUN)('LIVE ReverbNation end-to-end', () => {
       const auth = new AuthService(browser, cfg.site, log)
       const nav = new NavigationService(browser, cfg.site, log)
       const scanner = new TrendingScanner(cfg.site, human, log)
+      const rotation = new ProfileRotationManager(config, log)
       const library = new LibraryManager(cfg.site, human, log)
       const report = new ReportService(db, cfg.paths.reportsPath, log)
       const health = new HealthMonitor(browser, db)
@@ -75,6 +77,7 @@ describe.skipIf(!RUN)('LIVE ReverbNation end-to-end', () => {
         auth,
         nav,
         scanner,
+        rotation,
         processorFactory: () =>
           new ArtistProcessor(browser, db, library, new HumanBehavior(config.get().automation), config.get().automation, log),
         health,

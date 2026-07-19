@@ -24,6 +24,8 @@ export const automationSchema = z.object({
   stopAfterFailures: z.number().int().min(0).max(1000),
   cycleLocations: z.boolean(),
   turbo: z.boolean(),
+  perProfileLimit: z.number().int().min(0).max(10000),
+  rotateProfiles: z.boolean(),
   exportReportOnFinish: z.boolean(),
   reportFormat: z.enum(['csv', 'json', 'xlsx'])
 })

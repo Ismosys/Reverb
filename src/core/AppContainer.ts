@@ -11,6 +11,7 @@ import { ArtistProcessor } from './services/ArtistProcessor'
 import { HumanBehavior } from './services/HumanBehavior'
 import { HealthMonitor } from './health/HealthMonitor'
 import { ReportService } from './reporting/ReportService'
+import { ProfileRotationManager } from './rotation/ProfileRotationManager'
 import { AutomationEngine } from './engine/AutomationEngine'
 
 /**
@@ -28,6 +29,7 @@ export class AppContainer {
   readonly geocoding: GeocodingService
   readonly scanner: TrendingScanner
   readonly library: LibraryManager
+  readonly rotation: ProfileRotationManager
   readonly health: HealthMonitor
   readonly report: ReportService
   readonly engine: AutomationEngine
@@ -46,6 +48,7 @@ export class AppContainer {
     this.geocoding = new GeocodingService(this.log)
     this.scanner = new TrendingScanner(cfg.site, human, this.log)
     this.library = new LibraryManager(cfg.site, human, this.log)
+    this.rotation = new ProfileRotationManager(this.config, this.log)
     this.report = new ReportService(this.db, cfg.paths.reportsPath, this.log)
     this.health = new HealthMonitor(this.browser, this.db)
 
@@ -70,6 +73,7 @@ export class AppContainer {
       auth: this.auth,
       nav: this.nav,
       scanner: this.scanner,
+      rotation: this.rotation,
       processorFactory,
       health: this.health,
       report: this.report

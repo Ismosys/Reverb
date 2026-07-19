@@ -6,6 +6,7 @@ import {
   type ArtistQuery,
   type ArtistRecord,
   type AuthStatus,
+  type DatabaseStats,
   type HealthSnapshot,
   type IpcResult,
   type LogEntry,
@@ -59,6 +60,7 @@ const api = {
   },
   db: {
     query: (q: ArtistQuery): Promise<IpcResult<ArtistRecord[]>> => ipcRenderer.invoke(IpcChannels.dbQuery, q),
+    stats: (): Promise<IpcResult<DatabaseStats>> => ipcRenderer.invoke(IpcChannels.dbStats),
     remove: (id: string): Promise<IpcResult<boolean>> => ipcRenderer.invoke(IpcChannels.dbDelete, id),
     clear: (): Promise<IpcResult<number>> => ipcRenderer.invoke(IpcChannels.dbClear),
     export: (format: ReportFormat): Promise<IpcResult<string>> => ipcRenderer.invoke(IpcChannels.dbExport, format)

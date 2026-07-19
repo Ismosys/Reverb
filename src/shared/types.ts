@@ -92,6 +92,12 @@ export interface AutomationSettings {
   /** Turbo mode: minimal pacing delays for maximum throughput (same on-screen
    *  interaction, just not padded). Trades human-like pacing for speed. */
   turbo: boolean
+  /** Max artists a single account may process before the pool rotates to the
+   *  next account. 0 = unlimited. */
+  perProfileLimit: number
+  /** Automatically rotate through all logged-in accounts toward one global
+   *  target, respecting `perProfileLimit` per account. */
+  rotateProfiles: boolean
   /** Automatically export a report when the run finishes. */
   exportReportOnFinish: boolean
   /** Report format used for the auto-export. */
@@ -164,6 +170,8 @@ export interface ArtistRecord {
   failureReason: string | null
   /** Location label the artist was discovered under. */
   locationLabel: string | null
+  /** The account (profile id) that processed this artist. */
+  profileId: string | null
   /** Processing duration in ms. */
   durationMs: number | null
   /** ISO timestamp when first seen. */
@@ -217,6 +225,8 @@ export interface RunStatus {
   /** Artists completed per minute. */
   speedPerMin: number
   startedAt: string | null
+  /** Account-rotation state (null when a single account is used). */
+  rotation: RotationStatus | null
 }
 
 export interface LogEntry {
@@ -230,6 +240,37 @@ export interface LogEntry {
   retryCount?: number
   durationMs?: number | null
   error?: string | null
+}
+
+/** Live account-rotation state during a pooled run. */
+export interface RotationStatus {
+  /** Whether the run is rotating across multiple accounts. */
+  enabled: boolean
+  activeProfileId: string | null
+  activeProfileName: string | null
+  /** Artists this account has saved during the current run. */
+  profileProcessed: number
+  /** Per-account limit (0 = unlimited). */
+  profileLimit: number
+  /** Total accounts in the pool for this run. */
+  profilesTotal: number
+  /** Accounts that have finished (limit reached or exhausted). */
+  profilesFinished: number
+  /** 1-based index of the current account in the rotation. */
+  rotationNumber: number
+}
+
+/** Aggregate database statistics. */
+export interface DatabaseStats {
+  totalArtists: number
+  saved: number
+  skipped: number
+  failed: number
+  duplicatesPrevented: number
+  profilesUsed: number
+  averageProcessingMs: number
+  sessions: number
+  sizeBytes: number
 }
 
 export interface HealthSnapshot {
@@ -299,6 +340,7 @@ export const IpcChannels = {
   dbDelete: 'db:delete',
   dbClear: 'db:clear',
   dbExport: 'db:export',
+  dbStats: 'db:stats',
   reportExport: 'report:export',
   logsExport: 'logs:export',
   healthGet: 'health:get'

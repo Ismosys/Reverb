@@ -26,6 +26,8 @@ export class BrowserManager extends TypedEmitter<BrowserEvents> {
   private _status: BrowserStatus = 'closed'
   /** Headless mode of the currently-running context (null when closed). */
   private currentHeadless: boolean | null = null
+  /** Profile dir of the currently-running context (for rotation reuse). */
+  private _currentProfilePath: string | null = null
   private readonly log: Logger
 
   constructor(log: Logger) {
@@ -87,6 +89,7 @@ export class BrowserManager extends TypedEmitter<BrowserEvents> {
 
       this.context = context
       this.currentHeadless = opts.headless
+      this._currentProfilePath = opts.profilePath
       this.setStatus('ready')
       this.log.info('browser', `Browser launched (headless=${opts.headless})`)
       return context
@@ -95,6 +98,20 @@ export class BrowserManager extends TypedEmitter<BrowserEvents> {
       this.setStatus('crashed')
       throw new BrowserCrashError('Failed to launch browser', err)
     }
+  }
+
+  /**
+   * Switch to a different account's persistent session in place: gracefully
+   * close the current context (flushing cookies) and launch the new profile.
+   * Reused during automatic profile rotation — no container rebuild.
+   */
+  async switchProfile(opts: BrowserOptions): Promise<BrowserContext> {
+    if (this._currentProfilePath === opts.profilePath && this._status === 'ready' && this.context) {
+      return this.context
+    }
+    this.log.info('browser', 'Switching account session')
+    await this.close()
+    return this.launch(opts)
   }
 
   /** Get an existing page or open a fresh one. */
@@ -124,6 +141,7 @@ export class BrowserManager extends TypedEmitter<BrowserEvents> {
     const ctx = this.context
     this.context = null
     this.currentHeadless = null
+    this._currentProfilePath = null
     this.setStatus('closed')
     if (ctx) {
       try {

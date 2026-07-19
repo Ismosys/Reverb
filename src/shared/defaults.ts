@@ -21,6 +21,8 @@ export const DEFAULT_AUTOMATION: AutomationSettings = {
   stopAfterFailures: 10,
   cycleLocations: false,
   turbo: true,
+  perProfileLimit: 100,
+  rotateProfiles: true,
   exportReportOnFinish: true,
   reportFormat: 'csv'
 }

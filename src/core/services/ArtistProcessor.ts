@@ -22,6 +22,8 @@ export interface ProcessOptions {
   locationLabel: string | null
   /** The row already shows as saved — skip without opening its menu. */
   knownSaved?: boolean
+  /** The account processing this artist (recorded globally on save). */
+  profileId?: string | null
   onStatus?: StatusReporter
   signal?: AbortSignal
 }
@@ -84,6 +86,7 @@ export class ArtistProcessor {
       const record = this.db.markResult(artist.artistId, {
         status: 'saved',
         updatesEnabled: result.updatesEnabled,
+        profileId: opts.profileId ?? null,
         failureReason: null,
         durationMs,
         incrementRetry: attempts > 0
