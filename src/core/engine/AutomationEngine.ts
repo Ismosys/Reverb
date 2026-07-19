@@ -302,8 +302,10 @@ export class AutomationEngine extends TypedEmitter<EngineEvents> {
     let first = true
 
     while (profile && !this.signal.aborted && this.saved < this.target) {
-      if (settings.stopAfterFailures > 0 && this.consecutiveFailures >= settings.stopAfterFailures) break
       this.currentProfileId = profile.id
+      // Fresh failure budget per account: throttling on one account rotates to
+      // the next (a different, un-throttled account) instead of stopping.
+      this.consecutiveFailures = 0
       const path = this.deps.config.profilePaths(profile.id).browserProfilePath
 
       // Activate this account's session (reuse the browser, just swap profile).
@@ -333,13 +335,19 @@ export class AutomationEngine extends TypedEmitter<EngineEvents> {
       this.deps.log.info('engine', `Account "${profile.name}" starting (cap ${cap}, ${this.saved}/${this.target} global)`)
       await this.runLocationPasses(settings, cap)
 
+      const savedThis = this.deps.rotation.currentCount()
+      const throttled = settings.stopAfterFailures > 0 && this.consecutiveFailures >= settings.stopAfterFailures
+      this.deps.log.info(
+        'engine',
+        `Account "${profile.name}" done — ${savedThis} saved${throttled ? ' (throttled, rotating to next account)' : ''}`
+      )
       profile = this.deps.rotation.advance()
     }
 
     if (this.saved < this.target && !this.signal.aborted) {
       this.deps.log.warn(
         'engine',
-        `Target not reached: ${this.saved}/${this.target}. All ${this.deps.rotation.eligibleProfiles().length} account(s) reached their limit.`,
+        `Target not reached: ${this.saved}/${this.target}. Every account reached its limit or was throttled.`,
         { status: 'partial' }
       )
     }

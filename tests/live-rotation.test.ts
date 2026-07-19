@@ -38,7 +38,11 @@ describe.skipIf(!RUN)('LIVE account rotation', () => {
 
       config.save({
         ...config.get(),
-        activeLocationId: 'global',
+        locations: [
+          ...config.get().locations,
+          { id: 'manila', label: 'Manila, Philippines', type: 'custom', latitude: 14.5995, longitude: 120.9842, query: 'Manila' }
+        ],
+        activeLocationId: 'manila',
         automation: {
           ...config.get().automation,
           artistsToSave: 16,

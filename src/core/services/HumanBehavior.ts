@@ -10,9 +10,9 @@ import { jitter, randomInt, sleep } from '../utils/async'
 export class HumanBehavior {
   constructor(private readonly settings: AutomationSettings) {}
 
-  /** Pause between artists. Near-zero in turbo mode. */
+  /** Pause between artists. A gentle pace in turbo to avoid rate-limit throttling. */
   betweenArtists(signal?: AbortSignal): Promise<void> {
-    if (this.settings.turbo) return jitter({ min: 0, max: 40 }, signal)
+    if (this.settings.turbo) return jitter({ min: 150, max: 350 }, signal)
     return jitter(this.settings.randomDelay, signal)
   }
 
