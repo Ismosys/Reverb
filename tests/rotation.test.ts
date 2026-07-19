@@ -1,6 +1,7 @@
-import { mkdtempSync } from 'node:fs'
+import { mkdirSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import BetterSqlite3 from 'better-sqlite3'
 import { describe, expect, it } from 'vitest'
 import { ConfigManager } from '@core/config/ConfigManager'
 import { Logger } from '@core/logging/Logger'
@@ -64,6 +65,34 @@ describe('ProfileRotationManager', () => {
     rot.begin(false)
     for (let i = 0; i < 500; i++) rot.recordSave()
     expect(rot.limitReached(0)).toBe(false)
+  })
+})
+
+describe('Database migration', () => {
+  it('opens a pre-profile_id database without error and adds the column', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'reverb-mig-'))
+    mkdirSync(join(dir, 'data'), { recursive: true })
+    const dbPath = join(dir, 'data', 'reverb.db')
+    // Simulate an old-schema database (no profile_id column, no profile index).
+    const legacy = new BetterSqlite3(dbPath)
+    legacy.exec(`
+      CREATE TABLE artists (
+        artist_id TEXT PRIMARY KEY, name TEXT NOT NULL, profile_url TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending', updates_enabled INTEGER NOT NULL DEFAULT 0,
+        retry_count INTEGER NOT NULL DEFAULT 0, failure_reason TEXT, location_label TEXT,
+        duration_ms INTEGER, created_at TEXT NOT NULL, processed_at TEXT
+      );
+      INSERT INTO artists (artist_id, name, profile_url, status, created_at)
+      VALUES ('1', 'Old', 'u', 'saved', '2026-01-01T00:00:00Z');
+    `)
+    legacy.close()
+
+    // Opening via our Database must migrate in place, not throw.
+    const db = new Database(dbPath)
+    expect(db.isCompleted('1')).toBe(true)
+    db.markResult('1', { status: 'saved', profileId: 'p9' })
+    expect(db.savedCountByProfile()).toEqual({ p9: 1 })
+    db.close()
   })
 })
 

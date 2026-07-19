@@ -73,7 +73,6 @@ export class Database {
       );
       CREATE INDEX IF NOT EXISTS idx_artists_status ON artists(status);
       CREATE INDEX IF NOT EXISTS idx_artists_name ON artists(name);
-      CREATE INDEX IF NOT EXISTS idx_artists_profile ON artists(profile_id);
 
       CREATE TABLE IF NOT EXISTS sessions (
         id           TEXT PRIMARY KEY,
@@ -87,11 +86,13 @@ export class Database {
         skipped      INTEGER NOT NULL DEFAULT 0
       );
     `)
-    // Add profile_id to databases created before multi-account support.
+    // Add profile_id to databases created before multi-account support — this
+    // MUST run before any index references the column.
     const cols = this.db.prepare(`PRAGMA table_info(artists)`).all() as Array<{ name: string }>
     if (!cols.some((c) => c.name === 'profile_id')) {
       this.db.exec(`ALTER TABLE artists ADD COLUMN profile_id TEXT`)
     }
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_artists_profile ON artists(profile_id)`)
   }
 
   /* ----------------------------- Artists ---------------------------- */
